@@ -1,0 +1,7 @@
+services:
+  stt:
+    build:
+      context: .
+      target: ${STT_VARIANT:-voxtral}
+      args:
+        APP_VERSION: ${STT_VERSION:-0.1.0}

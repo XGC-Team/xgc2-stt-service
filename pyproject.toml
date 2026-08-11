@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xgc2-stt-service"
+version = "0.1.0"
+description = "GPU streaming speech-to-text service for XGC2"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = { text = "MIT" }
+dependencies = [
+  "av>=16,<19",
+  "fastapi>=0.133,<0.137",
+  "httpx>=0.28,<0.29",
+  "numpy>=1.26,<3",
+  "pydantic-settings==2.15.0",
+  "python-multipart==0.0.32",
+  "uvicorn[standard]==0.52.1",
+  "websockets>=15,<18",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx2>=2.10,<3",
+  "pytest>=8.4,<9",
+  "ruff>=0.13,<0.14",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xgc2_stt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

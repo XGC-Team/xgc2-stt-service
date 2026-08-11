@@ -1,0 +1,37 @@
+services:
+  stt:
+    image: ${STT_IMAGE:-ghcr.io/lxk36/xgc2-stt-service:voxtral-0.1.0}
+    container_name: xgc2-stt-service
+    restart: unless-stopped
+    init: true
+    gpus: ${NVIDIA_VISIBLE_DEVICES:-all}
+    ports:
+      - "${STT_BIND_ADDRESS:-0.0.0.0}:${STT_PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-all}
+      NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}
+    volumes:
+      - xgc2-stt-cache:/var/lib/xgc2-stt
+    read_only: true
+    tmpfs:
+      - /tmp:size=4g,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 4096
+    shm_size: 8gb
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 10m
+
+volumes:
+  xgc2-stt-cache:
+    name: xgc2-stt-cache
