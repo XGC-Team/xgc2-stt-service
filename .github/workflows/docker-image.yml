@@ -14,17 +14,14 @@ concurrency:
   group: stt-images-${{ github.ref }}
   cancel-in-progress: ${{ github.ref_type == 'branch' }}
 
+env:
+  VERSION: 0.1.0
+  IMAGE: ghcr.io/${{ github.repository }}
+
 jobs:
-  publish:
+  checks:
+    name: Source checks
     runs-on: ubuntu-latest
-    timeout-minutes: 360
-    env:
-      VERSION: 0.1.0
-      IMAGE: ghcr.io/${{ github.repository }}
-      XGC_CN_REGISTRY: ${{ secrets.XGC_CN_REGISTRY }}
-      XGC_CN_NAMESPACE: ${{ secrets.XGC_CN_NAMESPACE }}
-      XGC_CN_USERNAME: ${{ secrets.XGC_CN_USERNAME }}
-      XGC_CN_PASSWORD: ${{ secrets.XGC_CN_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +36,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Source checks
+      - name: Run source gates
         run: |
           uv sync --frozen --extra dev
           uv run ruff check src tests scripts/verify-stream.py
@@ -53,7 +50,15 @@ jobs:
           STT_VARIANT=voxtral docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
           bash -n scripts/*.sh
 
-      - name: Free runner space for embedded-weight images
+  base:
+    name: Build common base
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner space
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
           df -h /
@@ -77,39 +82,79 @@ jobs:
             ${{ env.IMAGE }}:base-${{ env.VERSION }}
             ${{ env.IMAGE }}:base
             ${{ env.IMAGE }}:base-sha-${{ github.sha }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:base-${{ env.VERSION }}
+          cache-to: type=inline
           provenance: mode=max
           sbom: true
 
-      - name: Build and push embedded Qwen variant
+  variants:
+    name: Build ${{ matrix.variant }}
+    needs: base
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [qwen, voxtral]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve image tags
+        id: tags
+        env:
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          {
+            echo 'value<<EOF'
+            echo "${IMAGE}:${VARIANT}-${VERSION}"
+            echo "${IMAGE}:${VARIANT}"
+            echo "${IMAGE}:${VARIANT}-sha-${GITHUB_SHA}"
+            if [ "${VARIANT}" = voxtral ]; then
+              echo "${IMAGE}:latest"
+            fi
+            echo 'EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push embedded ${{ matrix.variant }} variant
         uses: docker/build-push-action@v6
         with:
           context: .
-          target: qwen
+          target: ${{ matrix.variant }}
           build-args: APP_VERSION=${{ env.VERSION }}
           push: true
-          tags: |
-            ${{ env.IMAGE }}:qwen-${{ env.VERSION }}
-            ${{ env.IMAGE }}:qwen
-            ${{ env.IMAGE }}:qwen-sha-${{ github.sha }}
+          tags: ${{ steps.tags.outputs.value }}
+          cache-from: |
+            type=registry,ref=${{ env.IMAGE }}:base-${{ env.VERSION }}
+            type=registry,ref=${{ env.IMAGE }}:${{ matrix.variant }}-${{ env.VERSION }}
+          cache-to: type=inline
           provenance: mode=max
           sbom: true
 
-      - name: Build and push embedded Voxtral variant
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: voxtral
-          build-args: APP_VERSION=${{ env.VERSION }}
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:voxtral-${{ env.VERSION }}
-            ${{ env.IMAGE }}:voxtral
-            ${{ env.IMAGE }}:voxtral-sha-${{ github.sha }}
-            ${{ env.IMAGE }}:latest
-          provenance: mode=max
-          sbom: true
-
-      - name: Mirror release tags to China registry when configured
+  mirror:
+    name: Mirror release tags
+    needs: [base, variants]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      XGC_CN_REGISTRY: ${{ secrets.XGC_CN_REGISTRY }}
+      XGC_CN_NAMESPACE: ${{ secrets.XGC_CN_NAMESPACE }}
+      XGC_CN_USERNAME: ${{ secrets.XGC_CN_USERNAME }}
+      XGC_CN_PASSWORD: ${{ secrets.XGC_CN_PASSWORD }}
+    steps:
+      - name: Mirror to private China registry when configured
         shell: bash
         run: |
           set -euo pipefail
