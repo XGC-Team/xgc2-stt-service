@@ -5,12 +5,13 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_dir}"
 
 variant="${1:-voxtral}"
+registry="${STT_REGISTRY_PREFIX:-ghcr.io/lxk36/xgc2-stt-service}"
 case "${variant}" in
   voxtral)
-    image="ghcr.io/lxk36/xgc2-stt-service:voxtral-0.1.0"
+    image="${registry}:voxtral-0.1.0"
     ;;
   qwen)
-    image="ghcr.io/lxk36/xgc2-stt-service:qwen-0.1.0"
+    image="${registry}:qwen-0.1.0"
     ;;
   *)
     echo "Usage: $0 [voxtral|qwen]" >&2

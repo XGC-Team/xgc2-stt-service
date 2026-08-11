@@ -19,6 +19,22 @@ All images share the same API and React/GCS WebUI:
 | `voxtral-0.1.0` | Voxtral Mini 4B Realtime 2602 | native 480 ms streaming | Recommended/default |
 | `latest` | Voxtral Mini 4B Realtime 2602 | native 480 ms streaming | Current recommended release |
 
+Release tags are published to both registries:
+
+```text
+ghcr.io/lxk36/xgc2-stt-service:<tag>
+crpi-pest1z0t9z6yd8c6.cn-beijing.personal.cr.aliyuncs.com/lxk_shared/xgc2-stt-service:<tag>
+```
+
+Use the Alibaba path as `STT_IMAGE` when it offers better connectivity on the
+deployment network; the image contents and tags are identical. The one-step
+script can use it without editing files:
+
+```bash
+STT_REGISTRY_PREFIX=crpi-pest1z0t9z6yd8c6.cn-beijing.personal.cr.aliyuncs.com/lxk_shared/xgc2-stt-service \
+  ./scripts/deploy-local.sh
+```
+
 The exact model revisions are pinned in the Dockerfile. Model files are stored
 under `/opt/xgc2-stt/models` in the image, not downloaded into a runtime volume.
 The writable `xgc2-stt-cache` volume contains only vLLM/Triton compilation
