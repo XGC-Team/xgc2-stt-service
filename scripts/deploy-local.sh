@@ -24,5 +24,6 @@ if [ ! -f .env ]; then
 fi
 
 STT_IMAGE="${image}" docker compose pull
-STT_IMAGE="${image}" docker compose up -d --remove-orphans
+STT_IMAGE="${image}" docker compose up -d --wait \
+  --wait-timeout "${STT_DEPLOY_TIMEOUT:-1800}" --remove-orphans
 docker compose ps

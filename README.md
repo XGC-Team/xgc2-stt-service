@@ -60,9 +60,10 @@ with one command:
 ```
 
 The script creates `.env` on first use, pulls the image, starts/replaces the
-container, and prints its status. Use `./scripts/deploy-local.sh qwen` to deploy
-the embedded Qwen comparison variant. No model download occurs during startup.
-Follow startup with `docker compose logs -f stt`.
+container, waits until the embedded model is ready, and prints its status. Use
+`./scripts/deploy-local.sh qwen` to deploy the embedded Qwen comparison variant.
+No model download occurs during startup. If deployment fails, inspect startup
+with `docker compose logs stt`.
 
 Readiness becomes healthy after vLLM loads and compiles the embedded model:
 
