@@ -203,14 +203,7 @@ export default function App() {
       topbar={(
         <Topbar
           leading={<ProductBrand product="STT" />}
-          actions={(
-            <>
-              <StatusBadge status={statusError ? 'offline' : status?.engine.state || 'connecting'} tone={engineTone}>
-                {engineLabel}
-              </StatusBadge>
-              <Button appearance="ghost" uiSize="compact" onClick={openSettings}>设置</Button>
-            </>
-          )}
+          actions={<Button appearance="ghost" uiSize="compact" onClick={openSettings}>设置</Button>}
         />
       )}
     >
@@ -219,7 +212,11 @@ export default function App() {
           className="capture-panel"
           padding="none"
           title="实时转写"
-          actions={streamState ? <StatusBadge status={captureState}>{streamState}</StatusBadge> : null}
+          actions={streamState
+            ? <StatusBadge status={captureState}>{streamState}</StatusBadge>
+            : status?.engine.state !== 'ready' || statusError
+              ? <StatusBadge status={statusError ? 'offline' : status?.engine.state || 'connecting'} tone={engineTone}>{engineLabel}</StatusBadge>
+              : null}
         >
           <AudioCaptureControl
             state={captureState}

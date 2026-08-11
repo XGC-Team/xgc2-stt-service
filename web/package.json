@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@xgc2/ui-react": "https://github.com/lxk36/xgc2-ui/releases/download/v0.3.0/xgc2-ui-react-0.3.0.tgz",
+    "@xgc2/ui-react": "https://github.com/lxk36/xgc2-ui/releases/download/v0.6.0/xgc2-ui-react-0.6.0.tgz",
     "react": "19.2.1",
     "react-dom": "19.2.1"
   },

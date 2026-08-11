@@ -118,7 +118,10 @@ The WebUI records with browser Web Audio, resamples to mono PCM16LE at 16 kHz,
 and streams it over WebSocket. `transcript.partial` replaces the current
 uncommitted preview; `transcript.final` is authoritative after the operator
 stops recording. The React interface uses the versioned `@xgc2/ui-react`
-package so its shell, controls, panels, status, and skin match GCS.
+package so its shell, controls, panels, global scrollbars, compact chrome, and
+skin match GCS. The topbar contains only the `XGC2 STT` title and Settings
+action; engine state appears beside the capture surface only when it is not
+ready and therefore affects the operator's next action.
 
 ## API
 
