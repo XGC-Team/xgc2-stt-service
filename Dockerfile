@@ -1,4 +1,4 @@
-ARG VLLM_IMAGE=vllm/vllm-openai:v0.27.1@sha256:0a51ea5b4ae2dc5d81890e5173f54203d2a3ae0cfffe51b8fd2afd4391bfd967
+ARG VLLM_IMAGE=vllm/vllm-openai:v0.27.1-cu129@sha256:07913e94a58a4e61322c88f8d4647411b4dd394838b53abacaa32448d9d8de0a
 
 FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS web-builder
 
@@ -16,7 +16,7 @@ ARG APP_VERSION=0.1.0
 LABEL org.opencontainers.image.title="XGC2 STT Base" \
       org.opencontainers.image.description="Native realtime GPU speech-to-text runtime for XGC2" \
       org.opencontainers.image.version="${APP_VERSION}" \
-      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.licenses="MIT AND Apache-2.0" \
       org.opencontainers.image.source="https://github.com/lxk36/xgc2-stt-service" \
       io.xgc2.stt.variant="base" \
       io.xgc2.stt.weights="external"

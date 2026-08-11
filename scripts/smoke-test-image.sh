@@ -17,7 +17,7 @@ docker run --rm -d \
   "${image}" >/dev/null
 
 for _ in $(seq 1 60); do
-  if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${port}/healthz" >/dev/null 2>&1; then
     break
   fi
   sleep 1
@@ -26,3 +26,4 @@ done
 curl -fsS "http://127.0.0.1:${port}/healthz" | grep -q '"status":"ok"'
 curl -fsS "http://127.0.0.1:${port}/api/status" | grep -q '"service":"xgc2-stt-service"'
 curl -fsS "http://127.0.0.1:${port}/" | grep -q 'XGC2'
+echo "Image smoke test passed: ${image}"

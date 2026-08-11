@@ -67,9 +67,10 @@ one XGC2 STT container
 
 ## One-step local deployment
 
-Prerequisites are Docker Compose v2, a supported NVIDIA driver, and NVIDIA
-Container Toolkit. From the repository, deploy the recommended Voxtral release
-with one command:
+Prerequisites are Docker Compose v2, NVIDIA driver 570 or newer, and NVIDIA
+Container Toolkit. Images use vLLM's CUDA 12.9 build so the RTX 4090 workstation
+does not require a CUDA 13 host driver. From the repository, deploy the
+recommended Voxtral release with one command:
 
 ```bash
 ./scripts/deploy-local.sh
