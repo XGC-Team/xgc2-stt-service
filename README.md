@@ -19,19 +19,18 @@ All images share the same API and React/GCS WebUI:
 | `voxtral-0.1.0` | Voxtral Mini 4B Realtime 2602 | native 480 ms streaming | Recommended/default |
 | `latest` | Voxtral Mini 4B Realtime 2602 | native 480 ms streaming | Current recommended release |
 
-Release tags are published to both registries:
+Public release tags are published to GHCR:
 
 ```text
 ghcr.io/lxk36/xgc2-stt-service:<tag>
-crpi-pest1z0t9z6yd8c6.cn-beijing.personal.cr.aliyuncs.com/lxk_shared/xgc2-stt-service:<tag>
 ```
 
-Use the Alibaba path as `STT_IMAGE` when it offers better connectivity on the
-deployment network; the image contents and tags are identical. The one-step
-script can use it without editing files:
+An optional private China mirror receives identical tags, but its address is
+not part of this public repository. Operators select it through private local
+configuration:
 
 ```bash
-STT_REGISTRY_PREFIX=crpi-pest1z0t9z6yd8c6.cn-beijing.personal.cr.aliyuncs.com/lxk_shared/xgc2-stt-service \
+STT_REGISTRY_PREFIX="${PRIVATE_REGISTRY}/xgc2-stt-service" \
   ./scripts/deploy-local.sh
 ```
 
