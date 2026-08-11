@@ -52,17 +52,19 @@ one XGC2 STT container
 ## One-step local deployment
 
 Prerequisites are Docker Compose v2, a supported NVIDIA driver, and NVIDIA
-Container Toolkit. Deploy the default Voxtral release:
+Container Toolkit. From the repository, deploy the recommended Voxtral release
+with one command:
 
 ```bash
-cp .env.example .env
-docker compose pull
-docker compose up -d
-docker compose logs -f stt
+./scripts/deploy-local.sh
 ```
 
-No model download occurs during startup. Readiness becomes healthy after vLLM
-loads and compiles the embedded model:
+The script creates `.env` on first use, pulls the image, starts/replaces the
+container, and prints its status. Use `./scripts/deploy-local.sh qwen` to deploy
+the embedded Qwen comparison variant. No model download occurs during startup.
+Follow startup with `docker compose logs -f stt`.
+
+Readiness becomes healthy after vLLM loads and compiles the embedded model:
 
 ```bash
 curl http://127.0.0.1:8000/healthz
@@ -70,7 +72,8 @@ curl http://127.0.0.1:8000/readyz
 docker compose exec stt nvidia-smi
 ```
 
-Switch to the embedded Qwen image by changing `STT_IMAGE` in `.env` to:
+For manual Compose operation, switch to the embedded Qwen image by changing
+`STT_IMAGE` in `.env` to:
 
 ```text
 ghcr.io/lxk36/xgc2-stt-service:qwen-0.1.0
