@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import threading
 from contextlib import suppress
@@ -227,13 +228,30 @@ class TextInjector:
         clipboard = self.application.clipboard()
         clipboard.setText(text)
         self.last_clipboard = text
-        keys = [Key.ctrl, Key.shift] if self.shortcut == "terminal" else [Key.ctrl]
-        for key in keys:
-            self.keyboard.press(key)
-        self.keyboard.press("v")
-        self.keyboard.release("v")
-        for key in reversed(keys):
-            self.keyboard.release(key)
+        xdotool = shutil.which("xdotool")
+        chord = "Shift+Insert" if self.shortcut == "terminal" else "ctrl+v"
+        if xdotool is not None:
+            try:
+                result = subprocess.run(
+                    [xdotool, "key", "--clearmodifiers", chord],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=2,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    return
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if self.shortcut == "terminal":
+            # Fallback for environments without xdotool. The preferred path
+            # clears physical hotkey modifiers before emitting the chord.
+            with self.keyboard.pressed(Key.shift):
+                self.keyboard.tap(Key.insert)
+            return
+        with self.keyboard.pressed(Key.ctrl):
+            self.keyboard.tap("v")
 
     def end(self) -> None:
         clipboard = self.application.clipboard()
@@ -270,7 +288,7 @@ class SettingsDialog(QDialog):
         self.trim_silence = QCheckBox()
         self.trim_silence.setChecked(settings.trim_leading_silence)
         self.paste_shortcut = QComboBox()
-        self.paste_shortcut.addItem("终端 Ctrl+Shift+V", "terminal")
+        self.paste_shortcut.addItem("终端 Shift+Insert", "terminal")
         self.paste_shortcut.addItem("桌面 Ctrl+V", "desktop")
         self.paste_shortcut.setCurrentIndex(max(0, self.paste_shortcut.findData(settings.paste_shortcut)))
         self.auto_enter = QCheckBox()

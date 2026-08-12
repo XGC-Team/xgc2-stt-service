@@ -180,7 +180,9 @@ window and tray icon expose settings; the default global shortcut is
 the next press commits and stops. The default API URL is
 `http://127.0.0.1:34897`; users enter their own IP/port or HTTPS URL and API key.
 
-Install it for the current user without `sudo`:
+Install it for the current user without `sudo`. The X11 host needs `xdotool`
+(`sudo apt install xdotool` on Ubuntu) so clipboard paste chords can clear any
+modifiers still held by the global hotkey:
 
 ```bash
 ./scripts/install-client.sh
@@ -190,7 +192,7 @@ xgc2-stt-client
 The client streams PCM to the service and synchronizes each replacement
 hypothesis into the terminal/input field that held focus when recording began.
 It rewrites only the changed tail with Backspace and clipboard paste, so Chinese
-input works in TUIs. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V` are selectable.
+input works in TUIs. Terminal `Shift+Insert` and desktop `Ctrl+V` are selectable.
 The client does not show transcript content and never presses Enter by default.
 When **Auto Enter** is enabled, each non-empty three-second silence-finalized
 segment is submitted with Enter, while the same microphone/WebSocket continues
