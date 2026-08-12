@@ -229,7 +229,7 @@ class TextInjector:
         clipboard.setText(text)
         self.last_clipboard = text
         xdotool = shutil.which("xdotool")
-        chord = "Shift+Insert" if self.shortcut == "terminal" else "ctrl+v"
+        chord = "ctrl+shift+v" if self.shortcut == "terminal" else "ctrl+v"
         if xdotool is not None:
             try:
                 result = subprocess.run(
@@ -247,8 +247,8 @@ class TextInjector:
         if self.shortcut == "terminal":
             # Fallback for environments without xdotool. The preferred path
             # clears physical hotkey modifiers before emitting the chord.
-            with self.keyboard.pressed(Key.shift):
-                self.keyboard.tap(Key.insert)
+            with self.keyboard.pressed(Key.ctrl), self.keyboard.pressed(Key.shift):
+                self.keyboard.tap("v")
             return
         with self.keyboard.pressed(Key.ctrl):
             self.keyboard.tap("v")
@@ -288,7 +288,7 @@ class SettingsDialog(QDialog):
         self.trim_silence = QCheckBox()
         self.trim_silence.setChecked(settings.trim_leading_silence)
         self.paste_shortcut = QComboBox()
-        self.paste_shortcut.addItem("终端 Shift+Insert", "terminal")
+        self.paste_shortcut.addItem("终端 Ctrl+Shift+V", "terminal")
         self.paste_shortcut.addItem("桌面 Ctrl+V", "desktop")
         self.paste_shortcut.setCurrentIndex(max(0, self.paste_shortcut.findData(settings.paste_shortcut)))
         self.auto_enter = QCheckBox()

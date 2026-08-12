@@ -192,7 +192,7 @@ xgc2-stt-client
 The client streams PCM to the service and synchronizes each replacement
 hypothesis into the terminal/input field that held focus when recording began.
 It rewrites only the changed tail with Backspace and clipboard paste, so Chinese
-input works in TUIs. Terminal `Shift+Insert` and desktop `Ctrl+V` are selectable.
+input works in TUIs. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V` are selectable.
 The client does not show transcript content and never presses Enter by default.
 When **Auto Enter** is enabled, each non-empty three-second silence-finalized
 segment is submitted with Enter, while the same microphone/WebSocket continues
@@ -210,7 +210,7 @@ OpenAI-compatible file transcription:
 
 ```bash
 curl http://127.0.0.1:34897/v1/audio/transcriptions \
-  -H "Authorization: Bearer ${STT_API_KEY}" \
+  -H "Authorization: Bearer ${XGC2_STT_API_KEY}" \
   -F file=@speech.wav \
   -F model=stt-1
 ```
@@ -241,9 +241,8 @@ the client session; its final event has `session_complete:true`. `reset` cancels
 without committing. `output_script` accepts `simplified` or `original`, while
 `trim_leading_silence` accepts a boolean. These are gateway controls; Voxtral
 Realtime still performs automatic language detection and does not accept a
-request-level language hint. `/v1/stream` is an alias. The API-only port does
-not expose the WebUI or documentation; local management documentation remains
-available on port 34896.
+request-level language hint. The API-only port does not expose the WebUI or
+documentation; local management documentation remains available on port 34896.
 
 ## Capacity and bandwidth
 
@@ -265,12 +264,12 @@ only increasing the configuration value.
 
 ## Authentication and proxying
 
-`STT_API_KEY` remains available as a legacy environment-provided key. Managed
-keys are generated from the loopback-only WebUI and enabling managed keys keeps
+Managed keys are generated from the loopback-only WebUI and enabling managed keys keeps
 authentication required even if every key is later revoked. HTTP accepts
 `Authorization: Bearer` or `X-API-Key`; browser WebSockets use the
-`access_token` query parameter. Before LAN use, configure a long API key and an
-HTTPS reverse proxy that preserves WebSocket upgrades and long-lived sessions.
+`access_token` query parameter. CLI verification reads a managed key from
+`XGC2_STT_API_KEY`. Before LAN use, configure a managed key and an HTTPS reverse
+proxy that preserves WebSocket upgrades and long-lived sessions.
 
 No private registry, LAN address, operator username, home path, organization
 domain, or credential is compiled into the client, server, or public images.
