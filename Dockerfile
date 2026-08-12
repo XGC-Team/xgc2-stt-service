@@ -27,7 +27,8 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tini; \
     rm -rf /var/lib/apt/lists/*
-RUN useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
+RUN getent passwd 2000 >/dev/null || \
+    useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -84,7 +85,8 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tini sox libsox-fmt-all; \
     rm -rf /var/lib/apt/lists/*
-RUN useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
+RUN getent passwd 2000 >/dev/null || \
+    useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
