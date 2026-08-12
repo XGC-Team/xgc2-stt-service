@@ -9,12 +9,15 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+DEFAULT_HOTKEY = "<ctrl>+<shift>+r"
+LEGACY_HOTKEYS = {"<ctrl>+<alt>+space"}
+
 
 @dataclass(frozen=True)
 class DesktopSettings:
     endpoint: str = "http://127.0.0.1:34897"
     api_key: str = ""
-    hotkey: str = "<ctrl>+<alt>+space"
+    hotkey: str = DEFAULT_HOTKEY
     output_script: str = "simplified"
     trim_leading_silence: bool = True
     paste_shortcut: str = "terminal"
@@ -37,6 +40,8 @@ def load_desktop_settings(path: Path | None = None) -> DesktopSettings:
         return DesktopSettings()
     allowed = {field.name for field in fields(DesktopSettings)}
     values = {key: value for key, value in raw.items() if key in allowed}
+    if values.get("hotkey") in LEGACY_HOTKEYS:
+        values["hotkey"] = DEFAULT_HOTKEY
     try:
         return DesktopSettings(**values)
     except TypeError:

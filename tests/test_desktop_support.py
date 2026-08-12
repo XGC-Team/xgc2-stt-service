@@ -40,9 +40,17 @@ def test_auto_enter_is_off_by_default() -> None:
     settings = DesktopSettings()
 
     assert settings.auto_enter is False
+    assert settings.hotkey == "<ctrl>+<shift>+r"
 
 
 def test_auto_enter_only_submits_silence_final() -> None:
     assert should_auto_enter(True, "silence") is True
     assert should_auto_enter(True, "commit") is False
     assert should_auto_enter(False, "silence") is False
+
+
+def test_legacy_invalid_space_hotkey_is_migrated(tmp_path: Path) -> None:
+    target = tmp_path / "client.json"
+    target.write_text('{"hotkey":"<ctrl>+<alt>+space"}', encoding="utf-8")
+
+    assert load_desktop_settings(target).hotkey == "<ctrl>+<shift>+r"
