@@ -176,24 +176,27 @@ No supported setting requires entering the container or rebuilding the image.
 The repository includes a native PySide6 client for Linux/X11. It is one local
 process, not another browser frontend/backend. A small always-on-top status
 window and tray icon expose settings; the default global shortcut is
-`Ctrl+Shift+R`. The first press connects and starts microphone capture, and
+`Ctrl+Shift+S`. The first press connects and starts microphone capture, and
 the next press commits and stops. The default API URL is
 `http://127.0.0.1:34897`; users enter their own IP/port or HTTPS URL and API key.
 
 Install it for the current user without `sudo`. The X11 host needs `xdotool`
-(`sudo apt install xdotool` on Ubuntu) so clipboard paste chords can clear any
-modifiers still held by the global hotkey:
+and `xclip` (`sudo apt install xdotool xclip` on Ubuntu). `xclip` serves the
+clipboard from an independent process while the client emits a paste chord, so
+the Qt event loop cannot leak a literal `V` into the focused input:
 
 ```bash
 ./scripts/install-client.sh
 xgc2-stt-client
 ```
 
-The client streams PCM to the service and synchronizes each replacement
-hypothesis into the terminal/input field that held focus when recording began.
-It rewrites only the changed tail with Backspace and clipboard paste, so Chinese
-input works in TUIs. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V` are selectable.
-The client does not show transcript content and never presses Enter by default.
+The client streams PCM to the service and shows each replacement hypothesis in
+a non-activating overlay near the focused window. Stable text is bright and the
+still-revisable tail is highlighted. Only a server-finalized segment is pasted
+once into the terminal/input field that held focus when recording began, so
+model revisions never churn the target and Chinese input methods cannot turn a
+paste chord into transcript text. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V`
+are selectable. The client never presses Enter by default.
 When **Auto Enter** is enabled, each non-empty three-second silence-finalized
 segment is submitted with Enter, while the same microphone/WebSocket continues
 for the next spoken request. Focus changes suppress both injection and Enter.

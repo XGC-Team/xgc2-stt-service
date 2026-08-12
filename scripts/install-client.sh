@@ -8,8 +8,8 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v xdotool >/dev/null 2>&1; then
-  echo "xdotool is required for reliable X11 text injection (Ubuntu: sudo apt install xdotool)" >&2
+if ! command -v xdotool >/dev/null 2>&1 || ! command -v xclip >/dev/null 2>&1; then
+  echo "xdotool and xclip are required for reliable X11 text injection (Ubuntu: sudo apt install xdotool xclip)" >&2
   exit 1
 fi
 

@@ -9,12 +9,13 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-DEFAULT_HOTKEY = "<ctrl>+<shift>+r"
-LEGACY_HOTKEYS = {"<ctrl>+<alt>+space"}
+DEFAULT_HOTKEY = "<ctrl>+<shift>+s"
+PREVIOUS_DEFAULT_HOTKEY = "<ctrl>+<shift>+r"
 
 
 @dataclass(frozen=True)
 class DesktopSettings:
+    schema_version: int = 1
     endpoint: str = "http://127.0.0.1:34897"
     api_key: str = ""
     hotkey: str = DEFAULT_HOTKEY
@@ -36,11 +37,11 @@ def load_desktop_settings(path: Path | None = None) -> DesktopSettings:
         raw = json.loads(target.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return DesktopSettings()
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or raw.get("schema_version") != 1:
         return DesktopSettings()
     allowed = {field.name for field in fields(DesktopSettings)}
     values = {key: value for key, value in raw.items() if key in allowed}
-    if values.get("hotkey") in LEGACY_HOTKEYS:
+    if values.get("hotkey") == PREVIOUS_DEFAULT_HOTKEY:
         values["hotkey"] = DEFAULT_HOTKEY
     try:
         return DesktopSettings(**values)
