@@ -1,0 +1,116 @@
+name: Desktop client Deb CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".xgc2/**"
+      - ".github/workflows/client-deb-ci.yml"
+      - ".github/workflows/client-deb.yml"
+      - ".github/workflows/review.yml"
+      - ".gitignore"
+      - "LICENSE"
+      - "README.md"
+      - "THIRD_PARTY_NOTICES.md"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/xgc2_stt/__init__.py"
+      - "src/xgc2_stt/desktop.py"
+      - "src/xgc2_stt/desktop_support.py"
+      - "tests/test_desktop_support.py"
+      - "tests/test_desktop_audio.py"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".xgc2/**"
+      - ".github/workflows/client-deb-ci.yml"
+      - ".github/workflows/client-deb.yml"
+      - ".github/workflows/review.yml"
+      - ".gitignore"
+      - "LICENSE"
+      - "README.md"
+      - "THIRD_PARTY_NOTICES.md"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/xgc2_stt/__init__.py"
+      - "src/xgc2_stt/desktop.py"
+      - "src/xgc2_stt/desktop_support.py"
+      - "tests/test_desktop_support.py"
+      - "tests/test_desktop_audio.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stt-client-deb-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-compliance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check package contract
+        run: ./.xgc2/scripts/check_client_package.sh
+
+  build-and-smoke:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.24"
+          enable-cache: true
+      - name: Build Focal Deb
+        run: |
+          ./.xgc2/scripts/build_client_deb_in_docker.sh \
+            --distribution focal \
+            --architecture "${{ matrix.architecture }}" \
+            --output-dir "$GITHUB_WORKSPACE/debs"
+      - name: Smoke-test installed package on Focal
+        run: |
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -e TARGET_ARCH="${{ matrix.architecture }}" \
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ubuntu:20.04 bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get -o Acquire::Retries=5 update >/dev/null
+              apt-get install -y --no-install-recommends ./debs/xgc2-stt-client_*.deb >/dev/null
+              apt-get install -y --no-install-recommends dbus-x11 xauth xvfb >/dev/null
+              ./.xgc2/scripts/smoke_client_deb.sh ./debs/xgc2-stt-client_*.deb
+            '
+      - name: Create trusted build manifest
+        run: |
+          install -d .ci/build-manifests
+          version="$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)"
+          python3 .xgc2/scripts/xgc2_artifact_manifest.py build \
+            --deb-dir debs \
+            --output-dir .ci/build-manifests \
+            --product xgc2-stt-client \
+            --product-version "$version" \
+            --distribution focal \
+            --architecture "${{ matrix.architecture }}" \
+            --source-sha "$GITHUB_SHA" \
+            --ci-run-id "$GITHUB_RUN_ID" \
+            --ci-workflow "$GITHUB_WORKFLOW" \
+            --ci-workflow-ref "$GITHUB_WORKFLOW_REF"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xgc2-stt-client-focal-${{ matrix.architecture }}
+          path: |
+            debs/*.deb
+            .ci/build-manifests/*.json
+          retention-days: 14
+          if-no-files-found: error
+          include-hidden-files: true

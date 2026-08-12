@@ -7,15 +7,16 @@ import shutil
 import subprocess
 import sys
 import threading
+from array import array
 from contextlib import suppress
 from html import escape
 from typing import Any
 
+import sounddevice
 from pynput.keyboard import Controller as KeyboardController
-from pynput.keyboard import GlobalHotKeys, Key
+from pynput.keyboard import GlobalHotKeys, HotKey, Key, KeyCode
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QCursor, QMouseEvent, QTextCursor
-from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -39,6 +40,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from websockets.sync.client import connect
+from Xlib import XK, X, display, error
 
 from .desktop_support import (
     DesktopSettings,
@@ -46,11 +48,219 @@ from .desktop_support import (
     save_desktop_settings,
     set_autostart,
     should_auto_enter,
+    streaming_headers,
     streaming_url,
 )
 
 _COMMIT = object()
 _CANCEL = object()
+
+
+def _parse_hotkey(specification: str) -> tuple[int, frozenset[str]]:
+    modifier_names = {
+        "alt": "alt",
+        "alt_l": "alt",
+        "alt_r": "alt",
+        "cmd": "super",
+        "cmd_l": "super",
+        "cmd_r": "super",
+        "ctrl": "ctrl",
+        "ctrl_l": "ctrl",
+        "ctrl_r": "ctrl",
+        "shift": "shift",
+        "shift_l": "shift",
+        "shift_r": "shift",
+    }
+    modifiers: set[str] = set()
+    keysyms: list[int] = []
+    for key in HotKey.parse(specification):
+        modifier_name = key.name if isinstance(key, Key) else None
+        if modifier_name in modifier_names:
+            modifiers.add(modifier_names[modifier_name])
+            continue
+        if isinstance(key, KeyCode):
+            keysym = key.vk if key.vk is not None else XK.string_to_keysym(key.char or "")
+        else:
+            value = key.value
+            keysym = getattr(value, "vk", value)
+        if not isinstance(keysym, int) or keysym <= 0:
+            raise ValueError("快捷键包含 X11 无法识别的按键")
+        keysyms.append(keysym)
+    if len(keysyms) != 1:
+        raise ValueError("快捷键必须包含且只能包含一个非修饰键")
+    return keysyms[0], frozenset(modifiers)
+
+
+def _modifier_mask_for_keysyms(x_display: Any, keysym_names: tuple[str, ...]) -> int:
+    keycodes = {
+        x_display.keysym_to_keycode(XK.string_to_keysym(name))
+        for name in keysym_names
+    } - {0}
+    for index, mapped_keycodes in enumerate(x_display.get_modifier_mapping()):
+        if keycodes.intersection(mapped_keycodes):
+            return 1 << index
+    return 0
+
+
+def _x11_modifier_masks(x_display: Any, modifier_names: frozenset[str]) -> tuple[int, tuple[int, ...]]:
+    available = {
+        "ctrl": X.ControlMask,
+        "shift": X.ShiftMask,
+        "alt": _modifier_mask_for_keysyms(x_display, ("Alt_L", "Alt_R")),
+        "super": _modifier_mask_for_keysyms(x_display, ("Super_L", "Super_R")),
+    }
+    missing = modifier_names - {name for name, mask in available.items() if mask}
+    if missing:
+        raise ValueError(f"当前 X11 键盘映射缺少修饰键: {', '.join(sorted(missing))}")
+    modifiers = 0
+    for name in modifier_names:
+        modifiers |= available[name]
+
+    lock_masks = {
+        _modifier_mask_for_keysyms(x_display, ("Caps_Lock",)),
+        _modifier_mask_for_keysyms(x_display, ("Num_Lock",)),
+        _modifier_mask_for_keysyms(x_display, ("Scroll_Lock",)),
+    } - {0}
+    ignored = {0}
+    for mask in lock_masks:
+        ignored.update({existing | mask for existing in tuple(ignored)})
+    return modifiers, tuple(sorted(ignored))
+
+
+class ExclusiveX11HotKey:
+    """A passive X11 key grab that doesn't leak the shortcut into the focused app."""
+
+    def __init__(self, specification: str, callback: Any):
+        self.keysym, self.modifier_names = _parse_hotkey(specification)
+        self.callback = callback
+        self._display: Any = None
+        self._root: Any = None
+        self._keycode = 0
+        self._modifiers = 0
+        self._ignored_modifier_masks: tuple[int, ...] = ()
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._startup_error: BaseException | None = None
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError("快捷键监听器已在运行")
+        self._stop.clear()
+        self._ready.clear()
+        self._startup_error = None
+        self._thread = threading.Thread(target=self._run, name="xgc2-stt-hotkey", daemon=True)
+        self._thread.start()
+        if not self._ready.wait(timeout=3):
+            self.stop()
+            raise RuntimeError("快捷键监听器启动超时")
+        if self._startup_error is not None:
+            startup_error = self._startup_error
+            self._thread.join(timeout=1)
+            self._thread = None
+            raise RuntimeError(str(startup_error)) from startup_error
+
+    def _run(self) -> None:
+        try:
+            self._display = display.Display()
+            self._root = self._display.screen().root
+            self._keycode = self._display.keysym_to_keycode(self.keysym)
+            if not self._keycode:
+                raise ValueError("快捷键在当前 X11 键盘映射中不可用")
+            self._modifiers, self._ignored_modifier_masks = _x11_modifier_masks(
+                self._display, self.modifier_names
+            )
+            grab_errors: list[error.CatchError] = []
+            for ignored in self._ignored_modifier_masks:
+                catcher = error.CatchError()
+                self._root.grab_key(
+                    self._keycode,
+                    self._modifiers | ignored,
+                    False,
+                    X.GrabModeAsync,
+                    X.GrabModeAsync,
+                    onerror=catcher,
+                )
+                grab_errors.append(catcher)
+            self._display.sync()
+            if any(catcher.get_error() is not None for catcher in grab_errors):
+                raise RuntimeError("快捷键已被其他应用占用")
+            self._ready.set()
+            self._listen()
+        except BaseException as exc:
+            self._startup_error = exc
+            self._ready.set()
+        finally:
+            self._release()
+
+    def _listen(self) -> None:
+        pressed = False
+        pending_event: Any = None
+        while not self._stop.wait(0.02):
+            if pending_event is not None:
+                event = pending_event
+                pending_event = None
+            elif self._display is not None and self._display.pending_events():
+                event = self._display.next_event()
+            else:
+                continue
+            # X11 can interleave MappingNotify and other housekeeping events
+            # with grabbed key events. Those events do not expose ``detail``;
+            # inspect the type before reading key-specific fields so one
+            # keyboard-map notification cannot terminate the listener.
+            if event.type not in (X.KeyPress, X.KeyRelease):
+                continue
+            if event.detail != self._keycode:
+                continue
+            if event.type == X.KeyPress:
+                if not pressed:
+                    pressed = True
+                    self.callback()
+                continue
+            if event.type != X.KeyRelease:
+                continue
+            if self._display is not None and self._display.pending_events():
+                next_event = self._display.next_event()
+                if (
+                    next_event.type == X.KeyPress
+                    and next_event.detail == self._keycode
+                    and next_event.time == event.time
+                ):
+                    continue
+                pending_event = next_event
+            pressed = False
+
+    def _release(self) -> None:
+        if self._display is None:
+            return
+        if self._root is not None and self._keycode:
+            for ignored in self._ignored_modifier_masks:
+                with suppress(Exception):
+                    self._root.ungrab_key(self._keycode, self._modifiers | ignored)
+            with suppress(Exception):
+                self._display.sync()
+        with suppress(Exception):
+            self._display.close()
+        self._display = None
+        self._root = None
+        self._keycode = 0
+
+    def stop(self) -> None:
+        self._stop.set()
+        thread = self._thread
+        if thread is None or thread is threading.current_thread():
+            return
+        thread.join(timeout=2)
+        if thread.is_alive():
+            raise RuntimeError("快捷键监听器未能停止")
+        self._thread = None
+
+
+def create_hotkey_listener(specification: str, callback: Any) -> ExclusiveX11HotKey | GlobalHotKeys:
+    _parse_hotkey(specification)
+    if os.environ.get("XDG_SESSION_TYPE", "x11").lower() == "wayland":
+        return GlobalHotKeys({specification: callback})
+    return ExclusiveX11HotKey(specification, callback)
 
 
 class StreamSignals(QObject):
@@ -87,6 +297,7 @@ class StreamingWorker:
         try:
             with connect(
                 streaming_url(self.settings),
+                additional_headers=streaming_headers(self.settings),
                 open_timeout=10,
                 close_timeout=5,
                 max_size=4 * 1024 * 1024,
@@ -145,41 +356,75 @@ class AudioCapture(QObject):
     def __init__(self, on_pcm: Any, parent: QObject | None = None):
         super().__init__(parent)
         self.on_pcm = on_pcm
-        self.source: QAudioSource | None = None
-        self.device: Any = None
+        self.stream: sounddevice.RawInputStream | None = None
+        self._lifecycle_lock = threading.Lock()
+        self._callback_lock = threading.Lock()
+        self._accepting_audio = threading.Event()
+        self._failure_reported = threading.Event()
 
     def start(self) -> None:
-        device = QMediaDevices.defaultAudioInput()
-        if device.isNull():
-            raise RuntimeError("没有可用的麦克风")
-        audio_format = QAudioFormat()
-        audio_format.setSampleRate(16000)
-        audio_format.setChannelCount(1)
-        audio_format.setSampleFormat(QAudioFormat.SampleFormat.Int16)
-        if not device.isFormatSupported(audio_format):
-            raise RuntimeError("当前音频设备不支持 16 kHz 单声道 PCM16")
-        self.source = QAudioSource(device, audio_format, self)
-        self.source.setBufferSize(16000)
-        self.device = self.source.start()
-        if self.device is None:
-            self.source = None
-            raise RuntimeError("无法启动麦克风")
-        self.device.readyRead.connect(self._read)
+        with self._lifecycle_lock:
+            if self.stream is not None:
+                raise RuntimeError("麦克风已经启动")
+            stream: sounddevice.RawInputStream | None = None
+            try:
+                stream = sounddevice.RawInputStream(
+                    samplerate=16000,
+                    blocksize=0,
+                    channels=1,
+                    dtype="int16",
+                    callback=self._read,
+                )
+                self.stream = stream
+                self._failure_reported.clear()
+                self._accepting_audio.set()
+                stream.start()
+            except Exception as exc:
+                self._accepting_audio.clear()
+                self.stream = None
+                if stream is not None:
+                    with suppress(Exception):
+                        stream.close()
+                raise RuntimeError(f"无法启动麦克风: {exc}") from exc
 
-    @Slot()
-    def _read(self) -> None:
-        if self.device is None:
-            return
-        data = bytes(self.device.readAll())
-        if data:
-            self.on_pcm(data)
+    def _read(self, indata: Any, _frames: int, _time: Any, _status: Any) -> None:
+        try:
+            with self._callback_lock:
+                if not self._accepting_audio.is_set():
+                    return
+                pcm = bytes(indata)
+                if sys.byteorder != "little":
+                    samples = array("h")
+                    samples.frombytes(pcm)
+                    samples.byteswap()
+                    pcm = samples.tobytes()
+                if pcm:
+                    self.on_pcm(pcm)
+        except Exception as exc:
+            self._accepting_audio.clear()
+            if not self._failure_reported.is_set():
+                self._failure_reported.set()
+                self.failed.emit(str(exc))
+            raise sounddevice.CallbackAbort from exc
 
     def stop(self) -> None:
-        if self.source is not None:
-            self.source.stop()
-            self.source.deleteLater()
-        self.source = None
-        self.device = None
+        with self._lifecycle_lock:
+            self._accepting_audio.clear()
+            stream = self.stream
+            self.stream = None
+            if stream is not None:
+                with suppress(Exception):
+                    stream.stop()
+                with suppress(Exception):
+                    stream.close()
+            # A callback that passed the active check before stop() must finish
+            # before this method returns. A queued callback sees the cleared
+            # event and cannot send audio into the next recognition session.
+            with self._callback_lock:
+                pass
+
+    def close(self) -> None:
+        self.stop()
 
 
 class FocusTracker:
@@ -293,7 +538,7 @@ class SettingsDialog(QDialog):
             self.move(area.center().x() - self.width() // 2, area.center().y() - self.height() // 2)
 
         self.endpoint = QLineEdit(settings.endpoint)
-        self.endpoint.setPlaceholderText("http://127.0.0.1:34897")
+        self.endpoint.setPlaceholderText("输入自有 STT API URL")
         self.api_key = QLineEdit(settings.api_key)
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key.setPlaceholderText("输入服务器分配的 API Key")
@@ -304,7 +549,7 @@ class SettingsDialog(QDialog):
         self.api_key_visibility.setFixedWidth(58)
         self.api_key_visibility.toggled.connect(self._toggle_api_key)
         self.hotkey = QLineEdit(settings.hotkey)
-        self.hotkey.setPlaceholderText("<f8>")
+        self.hotkey.setPlaceholderText("<f9>")
         self.silence_seconds = QDoubleSpinBox()
         self.silence_seconds.setRange(0.5, 30.0)
         self.silence_seconds.setSingleStep(0.5)
@@ -652,7 +897,8 @@ class ClientController(QObject):
         self.injector = TextInjector(application)
         self.overlay = Overlay()
         self.toggle_requested.connect(self.toggle)
-        self.hotkeys: GlobalHotKeys | None = None
+        self.hotkeys: ExclusiveX11HotKey | GlobalHotKeys | None = None
+        self._hotkey_binding: tuple[int, frozenset[str]] | None = None
         self._shutting_down = False
         self._start_hotkey()
 
@@ -676,6 +922,8 @@ class ClientController(QObject):
         self.tray.show()
         self.overlay.hide()
         self._sync_tray()
+        if not self.settings.endpoint:
+            QTimer.singleShot(0, self.open_settings)
 
     def _sync_tray(self) -> None:
         label, tooltip, enabled = {
@@ -692,13 +940,36 @@ class ClientController(QObject):
     def _start_hotkey(self) -> None:
         if self.hotkeys is not None:
             self.hotkeys.stop()
+            self.hotkeys = None
+            self._hotkey_binding = None
         try:
-            self.hotkeys = GlobalHotKeys({self.settings.hotkey: self.toggle_requested.emit})
+            self.hotkeys = create_hotkey_listener(self.settings.hotkey, self.toggle_requested.emit)
             self.hotkeys.start()
+            self._hotkey_binding = _parse_hotkey(self.settings.hotkey)
         except Exception as exc:
             self.hotkeys = None
+            self._hotkey_binding = None
             message = f"快捷键不可用: {exc}"
             QTimer.singleShot(0, lambda: self._show_error(message))
+
+    def _replace_hotkey(self, specification: str) -> None:
+        binding = _parse_hotkey(specification)
+        if self.hotkeys is not None and binding == self._hotkey_binding:
+            return
+        candidate = create_hotkey_listener(specification, self.toggle_requested.emit)
+        candidate.start()
+        previous = self.hotkeys
+        previous_binding = self._hotkey_binding
+        self.hotkeys = candidate
+        self._hotkey_binding = binding
+        try:
+            if previous is not None:
+                previous.stop()
+        except Exception:
+            candidate.stop()
+            self.hotkeys = previous
+            self._hotkey_binding = previous_binding
+            raise
 
     @Slot()
     def toggle(self) -> None:
@@ -734,6 +1005,7 @@ class ClientController(QObject):
             return
         try:
             self.capture = AudioCapture(self.worker.feed, self)
+            self.capture.failed.connect(self._stream_failed)
             self.capture.start()
         except Exception as exc:
             self.worker.cancel()
@@ -802,17 +1074,23 @@ class ClientController(QObject):
         candidate = dialog.values()
         try:
             streaming_url(candidate)
-            GlobalHotKeys({candidate.hotkey: lambda: None})
+            self._replace_hotkey(candidate.hotkey)
         except Exception as exc:
             QMessageBox.critical(self.overlay, "设置无效", str(exc))
             return
+        previous = self.settings
         self.settings = candidate
-        save_desktop_settings(candidate)
-        command = [shutil.which("xgc2-stt-client") or sys.executable]
-        if command[0] == sys.executable:
-            command.extend(["-m", "xgc2_stt.desktop"])
-        set_autostart(candidate.start_at_login, command)
-        self._start_hotkey()
+        try:
+            save_desktop_settings(candidate)
+            command = [shutil.which("xgc2-stt-client") or sys.executable]
+            if command[0] == sys.executable:
+                command.extend(["-m", "xgc2_stt.desktop"])
+            set_autostart(candidate.start_at_login, command)
+        except Exception as exc:
+            self.settings = previous
+            with suppress(Exception):
+                self._replace_hotkey(previous.hotkey)
+            QMessageBox.critical(self.overlay, "设置保存失败", str(exc))
 
     def _show_error(self, message: str) -> None:
         self.overlay.set_state("错误", "#df8589")

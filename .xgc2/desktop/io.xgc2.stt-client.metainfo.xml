@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.xgc2.stt-client</id>
+  <name>XGC2 STT Client</name>
+  <summary>Tray client for a self-hosted streaming speech-to-text API</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>
+      Connects a Linux X11 desktop to a streaming speech-recognition service
+      selected by the user. The application provides a configurable global
+      shortcut, live revision preview, and focused text insertion.
+    </p>
+    <p>No service address or credential is bundled with the application.</p>
+  </description>
+  <launchable type="desktop-id">xgc2-stt-client.desktop</launchable>
+  <provides>
+    <binary>xgc2-stt-client</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+</component>

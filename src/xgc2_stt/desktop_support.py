@@ -9,13 +9,13 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-DEFAULT_HOTKEY = "<f8>"
+DEFAULT_HOTKEY = "<f9>"
 
 
 @dataclass(frozen=True)
 class DesktopSettings:
     schema_version: int = 1
-    endpoint: str = "http://127.0.0.1:34897"
+    endpoint: str = ""
     api_key: str = ""
     hotkey: str = DEFAULT_HOTKEY
     output_script: str = "simplified"
@@ -66,6 +66,10 @@ def streaming_url(settings: DesktopSettings) -> str:
         raise ValueError("服务器地址必须是 http(s) 或 ws(s) URL")
     scheme = {"http": "ws", "https": "wss"}.get(endpoint.scheme, endpoint.scheme)
     query = dict(parse_qsl(endpoint.query, keep_blank_values=True))
+    # Older deployments accepted browser credentials in this query field.
+    # A native client can send a real Authorization header, so never preserve
+    # a credential-bearing value from a pasted endpoint URL.
+    query.pop("access_token", None)
     query.update(
         {
             "sample_rate": "16000",
@@ -74,8 +78,6 @@ def streaming_url(settings: DesktopSettings) -> str:
             "silence_commit_ms": str(settings.silence_commit_ms),
         }
     )
-    if settings.api_key:
-        query["access_token"] = settings.api_key
     return urlunparse(
         (
             scheme,
@@ -86,6 +88,13 @@ def streaming_url(settings: DesktopSettings) -> str:
             "",
         )
     )
+
+
+def streaming_headers(settings: DesktopSettings) -> dict[str, str]:
+    """Keep credentials out of URLs and reverse-proxy access logs."""
+    if not settings.api_key:
+        return {}
+    return {"Authorization": f"Bearer {settings.api_key}"}
 
 
 def replacement_plan(previous: str, current: str) -> tuple[int, str]:

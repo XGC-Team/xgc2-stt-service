@@ -1,0 +1,42 @@
+schema: xgc2.product.v1
+id: xgc2-stt-client
+name: XGC2 STT Desktop Client
+version: 0.1.0-1
+kind: desktop-apt
+summary: X11 tray client for a user-supplied XGC2-compatible streaming STT API.
+groups:
+- desktop
+- audio
+apt:
+  distribution: focal
+  install:
+  - xgc2-stt-client
+  packages:
+  - xgc2-stt-client
+  depends:
+  - xclip
+  - xdotool
+usage:
+  install: 'sudo apt update
+
+    sudo apt install xgc2-stt-client
+
+    '
+  smoke_test: 'dpkg-query -W xgc2-stt-client
+
+    '
+  notes: The package contains no service URL, API key, private registry, or network port.
+    On first launch, the user supplies an endpoint operated by themselves or their organization.
+ownership:
+  paths:
+  - /opt/xgc2-stt-client
+  - /usr/bin/xgc2-stt-client
+  - /usr/share/applications/xgc2-stt-client.desktop
+  - /usr/share/metainfo/io.xgc2.stt-client.metainfo.xml
+release:
+  repository: lxk36/xgc2-stt-service
+  ref: main
+  workflow: client-deb.yml
+  ci_workflow: client-deb-ci.yml
+  apt_versions:
+    focal: 0.1.0-1

@@ -1,0 +1,157 @@
+name: Desktop client Deb release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Expected .xgc2/product.yml version
+        required: true
+        type: string
+      expected_source_sha:
+        description: Expected source commit SHA
+        required: true
+        type: string
+      prepare_action:
+        description: Release-train action
+        required: false
+        default: release
+        type: choice
+        options: [release, compatibility-verify]
+      apt_overlay_url:
+        description: Optional release-scoped staging APT base URL
+        required: false
+        default: ""
+        type: string
+      dependency_set_digest:
+        description: SHA256 of the resolved release-train dependency set
+        required: false
+        default: ""
+        type: string
+      run_cpp_quality:
+        description: Run C++ quality checks
+        required: true
+        default: false
+        type: boolean
+      run_source_tests:
+        description: Run source tests
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  XGC2_APT_OVERLAY_URL: ${{ inputs.apt_overlay_url }}
+  XGC2_DEPENDENCY_SET_DIGEST: ${{ inputs.dependency_set_digest }}
+
+jobs:
+  release-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release contract
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+          PREPARE_ACTION: ${{ inputs.prepare_action }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == refs/heads/main ]]
+          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]]
+          [[ "$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)" == "$EXPECTED_VERSION" ]]
+          case "$PREPARE_ACTION" in release|compatibility-verify) ;; *) exit 1 ;; esac
+          if [[ -n "$XGC2_DEPENDENCY_SET_DIGEST" && ! "$XGC2_DEPENDENCY_SET_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "dependency_set_digest must be empty or 64 lowercase hex characters" >&2
+            exit 1
+          fi
+          if [[ -n "$XGC2_APT_OVERLAY_URL" && -z "$XGC2_DEPENDENCY_SET_DIGEST" ]]; then
+            echo "apt_overlay_url requires dependency_set_digest" >&2
+            exit 1
+          fi
+          ./.xgc2/scripts/check_client_package.sh
+
+  cpp-quality:
+    if: ${{ inputs.run_cpp_quality }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: No C++ sources in the desktop client package
+        run: echo "No standalone C++ quality gate is required."
+
+  source-tests:
+    if: ${{ inputs.run_source_tests }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Run desktop source tests
+        run: |
+          uv sync --frozen --extra dev --extra desktop
+          uv run ruff check src tests
+          uv run pytest tests/test_desktop_support.py tests/test_desktop_audio.py
+
+  build-and-smoke:
+    needs: release-guard
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.24"
+          enable-cache: true
+      - name: Build Focal Deb
+        run: |
+          ./.xgc2/scripts/build_client_deb_in_docker.sh \
+            --distribution focal \
+            --architecture "${{ matrix.architecture }}" \
+            --output-dir "$GITHUB_WORKSPACE/debs"
+      - name: Smoke-test installed package on Focal
+        run: |
+          docker run --rm --platform "${{ matrix.platform }}" \
+            -e TARGET_ARCH="${{ matrix.architecture }}" \
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ubuntu:20.04 bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get -o Acquire::Retries=5 update >/dev/null
+              apt-get install -y --no-install-recommends ./debs/xgc2-stt-client_*.deb >/dev/null
+              apt-get install -y --no-install-recommends dbus-x11 xauth xvfb >/dev/null
+              ./.xgc2/scripts/smoke_client_deb.sh ./debs/xgc2-stt-client_*.deb
+            '
+      - name: Create release-train build manifest
+        run: |
+          install -d .ci/build-manifests
+          python3 .xgc2/scripts/xgc2_artifact_manifest.py build \
+            --deb-dir debs \
+            --output-dir .ci/build-manifests \
+            --product xgc2-stt-client \
+            --product-version "${{ inputs.expected_version }}" \
+            --distribution focal \
+            --architecture "${{ matrix.architecture }}" \
+            --source-sha "${{ inputs.expected_source_sha }}" \
+            --ci-run-id "$GITHUB_RUN_ID" \
+            --ci-workflow "$GITHUB_WORKFLOW" \
+            --ci-workflow-ref "$GITHUB_WORKFLOW_REF"
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.prepare_action == 'release' }}
+        with:
+          name: xgc2-stt-client-focal-${{ matrix.architecture }}-release-input
+          path: |
+            debs/*.deb
+            .ci/build-manifests/*.json
+          retention-days: 14
+          if-no-files-found: error
+          include-hidden-files: true
