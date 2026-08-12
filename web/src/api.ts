@@ -33,6 +33,8 @@ export interface ServiceStatus {
 export interface ConnectionSettings {
   endpoint: string
   apiKey: string
+  outputScript: 'simplified' | 'original'
+  trimLeadingSilence: boolean
 }
 
 export function normalizeEndpoint(value: string): string {

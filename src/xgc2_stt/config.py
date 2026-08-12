@@ -23,13 +23,16 @@ class Settings(BaseSettings):
     model_name: str = "mistralai/Voxtral-Mini-4B-Realtime-2602"
     compute_type: str = "bfloat16"
     transcription_delay_ms: int = Field(default=480, ge=80, le=10_000)
-    gpu_memory_utilization: float = Field(default=0.88, gt=0.1, le=0.98)
+    gpu_memory_utilization: float = Field(default=0.80, gt=0.1, le=0.98)
     max_model_len: int = Field(default=32_768, ge=2048, le=262_144)
     max_num_seqs: int = Field(default=8, ge=1, le=128)
     startup_timeout_seconds: int = Field(default=3600, ge=60, le=14_400)
     manage_engine: bool = True
     vllm_enforce_eager: bool = False
     vllm_log_level: str = "info"
+    qwen_chunk_size_seconds: float = Field(default=1.0, ge=0.25, le=5.0)
+    qwen_unfixed_chunk_num: int = Field(default=4, ge=1, le=16)
+    qwen_unfixed_token_num: int = Field(default=5, ge=1, le=64)
 
     api_key: SecretStr | None = None
     cors_origins: str = "*"

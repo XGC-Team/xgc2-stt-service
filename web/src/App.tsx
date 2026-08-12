@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
 import {
   AppShell,
   AudioCaptureControl,
@@ -24,6 +24,8 @@ function initialConnection(): ConnectionSettings {
   return {
     endpoint: localStorage.getItem('xgc2-stt.endpoint') || window.location.origin,
     apiKey: localStorage.getItem('xgc2-stt.apiKey') || '',
+    outputScript: localStorage.getItem('xgc2-stt.outputScript') === 'original' ? 'original' : 'simplified',
+    trimLeadingSilence: localStorage.getItem('xgc2-stt.trimLeadingSilence') !== 'false',
   }
 }
 
@@ -38,9 +40,11 @@ export default function App() {
   const [partialText, setPartialText] = useState('')
   const [transcript, setTranscript] = useState('')
   const [captureError, setCaptureError] = useState('')
+  const [waveformLevels, setWaveformLevels] = useState<readonly number[]>([])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [skin, setSkinState] = useState<Skin>(() => localStorage.getItem('xgc2-stt.skin') === 'dark' ? 'dark' : 'light')
   const streamRef = useRef<MicrophoneStream | null>(null)
+  const acceptStreamEventsRef = useRef(false)
   if (!streamRef.current) streamRef.current = new MicrophoneStream()
 
   const transitionCapture = useCallback((next: AudioCaptureState) => {
@@ -97,7 +101,15 @@ export default function App() {
         ? '生成结果'
         : '开始录音'
 
+  const waveformStyle = useMemo(() => Object.fromEntries(
+    waveformLevels.slice(0, 24).map((level, index) => [
+      `--stt-wave-${index + 1}`,
+      String(Math.max(0.12, Math.min(1, level))),
+    ]),
+  ) as CSSProperties, [waveformLevels])
+
   const handleStreamEvent = useCallback((event: StreamEvent) => {
+    if (!acceptStreamEventsRef.current) return
     if (event.type === 'session.started') {
       setStreamState('已连接')
       return
@@ -139,6 +151,7 @@ export default function App() {
       return
     }
     transitionCapture('connecting')
+    acceptStreamEventsRef.current = true
     try {
       await streamRef.current?.start(
         connection,
@@ -148,10 +161,12 @@ export default function App() {
           transitionCapture('idle')
           setStreamState('')
         },
+        setWaveformLevels,
       )
       transitionCapture('recording')
       setStreamState('录音中')
     } catch (error) {
+      acceptStreamEventsRef.current = false
       transitionCapture('idle')
       setStreamState('')
       setCaptureError(error instanceof Error ? error.message : '无法启动录音')
@@ -159,9 +174,21 @@ export default function App() {
   }, [connection, handleStreamEvent, status?.engine.state, transitionCapture])
 
   const cancelCapture = useCallback(async () => {
+    acceptStreamEventsRef.current = false
     await streamRef.current?.cancel()
     transitionCapture('idle')
     setPartialText('')
+    setStreamState('')
+    setWaveformLevels([])
+  }, [transitionCapture])
+
+  const clearTranscript = useCallback(async () => {
+    acceptStreamEventsRef.current = false
+    if (captureStateRef.current !== 'idle') await streamRef.current?.cancel()
+    transitionCapture('idle')
+    setTranscript('')
+    setPartialText('')
+    setCaptureError('')
     setStreamState('')
   }, [transitionCapture])
 
@@ -177,14 +204,18 @@ export default function App() {
 
   const saveSettings = async (event: FormEvent) => {
     event.preventDefault()
-    const next = {
+    const next: ConnectionSettings = {
       endpoint: normalizeEndpoint(draftConnection.endpoint),
       apiKey: draftConnection.apiKey.trim(),
+      outputScript: draftConnection.outputScript,
+      trimLeadingSilence: draftConnection.trimLeadingSilence,
     }
     setConnection(next)
     localStorage.setItem('xgc2-stt.endpoint', next.endpoint)
     if (next.apiKey) localStorage.setItem('xgc2-stt.apiKey', next.apiKey)
     else localStorage.removeItem('xgc2-stt.apiKey')
+    localStorage.setItem('xgc2-stt.outputScript', next.outputScript)
+    localStorage.setItem('xgc2-stt.trimLeadingSilence', String(next.trimLeadingSilence))
     setSettingsOpen(false)
     try {
       setStatus(await getStatus(next))
@@ -219,6 +250,7 @@ export default function App() {
               : null}
         >
           <AudioCaptureControl
+            style={waveformStyle}
             state={captureState}
             actionLabel={recordLabel}
             cancelLabel="取消"
@@ -236,7 +268,7 @@ export default function App() {
           actions={(
             <>
               <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript} onClick={() => void copyTranscript()}>复制</Button>
-              <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript} onClick={() => { setTranscript(''); setPartialText('') }}>清空</Button>
+              <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript && captureState === 'idle'} onClick={() => void clearTranscript()}>清空</Button>
             </>
           )}
         >
@@ -252,7 +284,7 @@ export default function App() {
               <div><dt>模型</dt><dd>{status.engine.model}</dd></div>
               <div><dt>引擎</dt><dd>{status.engine.variant} · {status.engine.backend}</dd></div>
               <div><dt>推理</dt><dd>{status.engine.device} · {status.engine.compute_type}</dd></div>
-              <div><dt>延迟</dt><dd>{status.stream.transcription_delay_ms} ms</dd></div>
+              <div><dt>模型延迟档位</dt><dd>{status.stream.transcription_delay_ms} ms</dd></div>
               <div><dt>GPU</dt><dd>{status.engine.cuda_devices ?? '未知'} 个设备</dd></div>
               <div><dt>版本</dt><dd>{status.version}</dd></div>
               <div><dt>认证</dt><dd>{status.authentication}</dd></div>
@@ -291,6 +323,28 @@ export default function App() {
               onValueChange={(apiKey) => setDraftConnection((current) => ({ ...current, apiKey }))}
             />
           </FormField>
+          <FormGroup label="中文输出">
+            <SegmentedControl
+              ariaLabel="中文输出"
+              value={draftConnection.outputScript}
+              options={[{ label: '简体', value: 'simplified' }, { label: '原样', value: 'original' }]}
+              onValueChange={(value) => setDraftConnection((current) => ({
+                ...current,
+                outputScript: value as ConnectionSettings['outputScript'],
+              }))}
+            />
+          </FormGroup>
+          <FormGroup label="开头静音">
+            <SegmentedControl
+              ariaLabel="开头静音"
+              value={draftConnection.trimLeadingSilence ? 'trim' : 'keep'}
+              options={[{ label: '裁剪', value: 'trim' }, { label: '保留', value: 'keep' }]}
+              onValueChange={(value) => setDraftConnection((current) => ({
+                ...current,
+                trimLeadingSilence: value === 'trim',
+              }))}
+            />
+          </FormGroup>
           <FormGroup label="皮肤">
             <SegmentedControl
               ariaLabel="皮肤"

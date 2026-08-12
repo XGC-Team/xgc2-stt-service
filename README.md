@@ -66,10 +66,11 @@ one XGC2 STT container
 
 ## One-step local deployment
 
-Prerequisites are Docker Compose v2, NVIDIA driver 570 or newer, and NVIDIA
-Container Toolkit. Images use vLLM's CUDA 12.9 build so the RTX 4090 workstation
-does not require a CUDA 13 host driver. From the repository, deploy the
-recommended Voxtral release with one command:
+Prerequisites are Docker Compose v2, NVIDIA Container Toolkit, and NVIDIA Linux
+driver `575.57.08` or newer; the 580 series is recommended and is the validated
+RTX 4090 configuration. Images use vLLM's CUDA 12.9 Update 1 build, so no host
+CUDA Toolkit and no CUDA 13 host runtime are required. From the repository,
+deploy the recommended Voxtral release with one command:
 
 ```bash
 ./scripts/deploy-local.sh
@@ -88,6 +89,12 @@ curl http://127.0.0.1:8000/healthz
 curl http://127.0.0.1:8000/readyz
 docker compose exec stt nvidia-smi
 ```
+
+The validated RTX 4090 cold start is about 50 seconds. The default 80% vLLM GPU
+memory budget leaves room for the workstation display and a small desktop STT
+process. If the driver modules are loaded after an Ubuntu driver upgrade but
+`/dev/nvidia0` is missing, run `sudo /sbin/ub-device-create --verbose` once and
+verify `nvidia-smi` before starting Compose.
 
 For manual Compose operation, switch to the embedded Qwen image by changing
 `STT_IMAGE` in `.env` to:
@@ -117,7 +124,11 @@ microphone capture on ordinary remote HTTP origins.
 The WebUI records with browser Web Audio, resamples to mono PCM16LE at 16 kHz,
 and streams it over WebSocket. `transcript.partial` replaces the current
 uncommitted preview; `transcript.final` is authoritative after the operator
-stops recording. The React interface uses the versioned `@xgc2/ui-react`
+stops recording. By default the gateway drops initial silence before the first
+speech frame and normalizes Chinese output to Simplified Chinese; both are
+operator settings in the WebUI. English and other Latin text is not translated.
+Clearing while a capture is active cancels that capture so late partial/final
+events cannot repopulate the cleared transcript. The React interface uses the versioned `@xgc2/ui-react`
 package so its shell, controls, panels, global scrollbars, compact chrome, and
 skin match GCS. The topbar contains only the `XGC2 STT` title and Settings
 action; engine state appears beside the capture surface only when it is not
@@ -143,7 +154,7 @@ language detection and does not expose those controls.
 Streaming endpoint:
 
 ```text
-ws://127.0.0.1:8000/v1/audio/transcriptions/stream?sample_rate=16000
+ws://127.0.0.1:8000/v1/audio/transcriptions/stream?sample_rate=16000&output_script=simplified&trim_leading_silence=1
 ```
 
 After `session.started`, send binary mono PCM16LE chunks. The gateway maps
@@ -155,7 +166,10 @@ vLLM's native realtime delta stream to replacement-friendly events:
 ```
 
 Send `{"type":"commit"}` to stop and finalize. `reset` cancels without
-committing. `/v1/stream` is an alias and `/docs` exposes OpenAPI documentation.
+committing. `output_script` accepts `simplified` or `original`, while
+`trim_leading_silence` accepts a boolean. These are gateway controls; Voxtral
+Realtime still performs automatic language detection and does not accept a
+request-level language hint. `/v1/stream` is an alias and `/docs` exposes OpenAPI documentation.
 
 ## Authentication and proxying
 
@@ -187,7 +201,11 @@ scripts/verify-gpu.sh
 ```
 
 This requires GPU visibility, a ready model, a non-empty Chinese HTTP result,
-and both partial and final native WebSocket transcripts.
+and both partial and final native WebSocket transcripts. The verifier sends one
+copy of the sample at real-time speed while receiving events concurrently. It
+reports first-partial latency, updates received before commit, and finalization
+latency; the model's configured 480 ms delay is not presented as end-to-end
+first-text latency.
 
 ## Publication
 

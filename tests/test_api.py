@@ -173,11 +173,13 @@ def test_stream_emits_partial_and_final_events(tmp_path: Path) -> None:
     engine = FakeEngine()
     with TestClient(create_app(settings(tmp_path), engine)) as client:
         with client.websocket_connect(
-            "/v1/audio/transcriptions/stream?sample_rate=16000&language=zh&partial_interval_ms=250"
+            "/v1/audio/transcriptions/stream?sample_rate=16000&output_script=simplified&trim_leading_silence=1"
         ) as socket:
             started = socket.receive_json()
             assert started["type"] == "session.started"
             assert started["format"] == "pcm_s16le"
+            assert started["output_script"] == "simplified"
+            assert started["trim_leading_silence"] is True
             socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 4000)
             partial = socket.receive_json()
             assert partial["type"] == "transcript.partial"
@@ -188,3 +190,16 @@ def test_stream_emits_partial_and_final_events(tmp_path: Path) -> None:
             assert final["sequence"] > partial["sequence"]
         assert bytes(engine.sessions[0].pcm) == (1000).to_bytes(2, "little", signed=True) * 4000
         assert engine.sessions[0].closed
+
+
+def test_stream_rejects_invalid_recognition_settings(tmp_path: Path) -> None:
+    engine = FakeEngine()
+    with TestClient(create_app(settings(tmp_path), engine)) as client:
+        with client.websocket_connect("/v1/stream?output_script=translated") as socket:
+            error = socket.receive_json()
+            assert error["type"] == "error"
+            assert error["code"] == "invalid_output_script"
+        with client.websocket_connect("/v1/stream?trim_leading_silence=maybe") as socket:
+            error = socket.receive_json()
+            assert error["code"] == "invalid_trim_leading_silence"
+    assert engine.sessions == []

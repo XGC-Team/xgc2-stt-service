@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
@@ -21,31 +22,70 @@ def main() -> int:
         query += f"&access_token={quote(api_key, safe='')}"
     uri = urlunparse(("wss" if base.scheme == "https" else "ws", base.netloc, "/v1/stream", "", query, ""))
 
-    partials: list[str] = []
+    partials: list[tuple[float, str]] = []
     final = ""
+    final_at = 0.0
+    failure: list[BaseException] = []
+    finished = threading.Event()
     with connect(uri, open_timeout=10, close_timeout=10) as socket:
         started = json.loads(socket.recv(timeout=10))
         if started.get("type") != "session.started":
             raise RuntimeError(f"unexpected first event: {started}")
-        with pcm_path.open("rb") as pcm_file:
-            while chunk := pcm_file.read(3200):
-                socket.send(chunk)
-                time.sleep(0.02)
-        socket.send(json.dumps({"type": "commit"}))
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            event = json.loads(socket.recv(timeout=120))
-            if event.get("type") == "transcript.partial" and event.get("text"):
-                partials.append(str(event["text"]))
-            if event.get("type") == "transcript.final":
-                final = str(event.get("text", ""))
-                break
 
+        audio_started_at = time.monotonic()
+
+        def receive_events() -> None:
+            nonlocal final, final_at
+            try:
+                while True:
+                    event = json.loads(socket.recv(timeout=120))
+                    received_at = time.monotonic()
+                    if event.get("type") == "transcript.partial" and event.get("text"):
+                        partials.append((received_at, str(event["text"])))
+                    if event.get("type") == "transcript.final":
+                        final = str(event.get("text", ""))
+                        final_at = received_at
+                        return
+                    if event.get("type") == "error":
+                        raise RuntimeError(f"stream returned an error: {event}")
+            except BaseException as exc:
+                failure.append(exc)
+            finally:
+                finished.set()
+
+        receiver = threading.Thread(target=receive_events, name="stt-verifier-receiver", daemon=True)
+        receiver.start()
+        sent_audio_seconds = 0.0
+        with pcm_path.open("rb") as pcm_file:
+            while chunk := pcm_file.read(1280):
+                socket.send(chunk)
+                sent_audio_seconds += len(chunk) / (16_000 * 2)
+                target = audio_started_at + sent_audio_seconds
+                time.sleep(max(0.0, target - time.monotonic()))
+        commit_sent_at = time.monotonic()
+        socket.send(json.dumps({"type": "commit"}))
+        if not finished.wait(timeout=120):
+            raise TimeoutError("stream did not return a final transcript within 120 seconds")
+        receiver.join(timeout=1)
+
+    if failure:
+        raise failure[0]
     if not partials:
         raise RuntimeError("stream returned no partial transcript")
     if not any("\u4e00" <= character <= "\u9fff" for character in final):
         raise RuntimeError(f"unexpected final transcript: {final!r}")
-    print(json.dumps({"partials": len(partials), "final": final}, ensure_ascii=False))
+    partials_before_commit = sum(received_at <= commit_sent_at for received_at, _ in partials)
+    if partials_before_commit == 0:
+        raise RuntimeError("stream returned no partial transcript while audio was still being captured")
+    result = {
+        "audio_seconds": round(sent_audio_seconds, 3),
+        "first_partial_seconds": round(partials[0][0] - audio_started_at, 3),
+        "partials": len(partials),
+        "partials_before_commit": partials_before_commit,
+        "final_after_commit_seconds": round(final_at - commit_sent_at, 3),
+        "final": final,
+    }
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 

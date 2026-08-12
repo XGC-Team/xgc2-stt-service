@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
 import httpx
+import numpy as np
 from websockets.asyncio.client import connect
 
 from .config import Settings
@@ -130,6 +131,92 @@ class VllmRealtimeSession:
         await self.websocket.close()
 
 
+class QwenSdkRealtimeSession:
+    """Adapter for Qwen's official revision-capable streaming state API."""
+
+    def __init__(self, client: httpx.AsyncClient, session_id: str, chunk_bytes: int):
+        self.client = client
+        self.session_id = session_id
+        self.chunk_bytes = chunk_bytes
+        self.buffer = bytearray()
+        self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self.last_text = ""
+        self.language = ""
+        self.finished = False
+
+    @classmethod
+    async def open(cls, settings: Settings) -> QwenSdkRealtimeSession:
+        client = httpx.AsyncClient(base_url=settings.internal_http_url, timeout=300)
+        try:
+            response = await client.post("/api/start")
+            response.raise_for_status()
+            session_id = str(response.json()["session_id"])
+            chunk_bytes = round(settings.qwen_chunk_size_seconds * 16000 * 2)
+            return cls(client, session_id, chunk_bytes)
+        except Exception:
+            await client.aclose()
+            raise
+
+    async def send_pcm(self, pcm: bytes) -> None:
+        if self.finished or not pcm:
+            return
+        self.buffer.extend(pcm)
+        while len(self.buffer) >= self.chunk_bytes:
+            chunk = bytes(self.buffer[: self.chunk_bytes])
+            del self.buffer[: self.chunk_bytes]
+            await self._send_chunk(chunk)
+
+    async def _send_chunk(self, pcm: bytes) -> None:
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+        samples *= 1.0 / 32768.0
+        response = await self.client.post(
+            "/api/chunk",
+            params={"session_id": self.session_id},
+            content=samples.tobytes(),
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        self.language = str(payload.get("language") or self.language)
+        text = str(payload.get("text") or "")
+        if text != self.last_text:
+            self.last_text = text
+            await self.events.put(
+                {"type": "transcription.partial", "text": text, "language": self.language or None}
+            )
+
+    async def commit(self) -> None:
+        if self.finished:
+            return
+        if self.buffer:
+            chunk = bytes(self.buffer)
+            self.buffer.clear()
+            await self._send_chunk(chunk)
+        response = await self.client.post("/api/finish", params={"session_id": self.session_id})
+        response.raise_for_status()
+        payload = response.json()
+        self.finished = True
+        self.language = str(payload.get("language") or self.language)
+        self.last_text = str(payload.get("text") or self.last_text)
+        await self.events.put(
+            {
+                "type": "transcription.done",
+                "text": self.last_text,
+                "language": self.language or None,
+            }
+        )
+
+    async def receive(self) -> dict[str, Any]:
+        return await self.events.get()
+
+    async def close(self) -> None:
+        if not self.finished:
+            with suppress(Exception):
+                await self.client.post("/api/finish", params={"session_id": self.session_id})
+        self.finished = True
+        await self.client.aclose()
+
+
 def build_vllm_command(settings: Settings) -> list[str]:
     command = [
         "vllm",
@@ -150,18 +237,45 @@ def build_vllm_command(settings: Settings) -> list[str]:
         "--served-model-name",
         settings.model_name,
     ]
-    if settings.engine_variant == "voxtral":
-        command.extend(["--tokenizer-mode", "mistral"])
-    else:
-        command.extend(
-            [
-                "--hf-overrides",
-                json.dumps({"architectures": ["Qwen3ASRRealtimeGeneration"]}, separators=(",", ":")),
-            ]
-        )
+    command.extend(
+        [
+            "--tokenizer-mode",
+            "mistral",
+            "--config-format",
+            "mistral",
+            "--compilation-config",
+            json.dumps({"cudagraph_mode": "PIECEWISE"}, separators=(",", ":")),
+            "--hf-overrides",
+            json.dumps({"architectures": ["VoxtralRealtimeGeneration"]}, separators=(",", ":")),
+        ]
+    )
     if settings.vllm_enforce_eager:
         command.append("--enforce-eager")
     return command
+
+
+def build_qwen_command(settings: Settings) -> list[str]:
+    return [
+        "qwen-asr-demo-streaming",
+        "--asr-model-path",
+        settings.model_id,
+        "--gpu-memory-utilization",
+        str(settings.gpu_memory_utilization),
+        "--host",
+        settings.internal_host,
+        "--port",
+        str(settings.internal_port),
+        "--unfixed-chunk-num",
+        str(settings.qwen_unfixed_chunk_num),
+        "--unfixed-token-num",
+        str(settings.qwen_unfixed_token_num),
+        "--chunk-size-sec",
+        str(settings.qwen_chunk_size_seconds),
+    ]
+
+
+def build_engine_command(settings: Settings) -> list[str]:
+    return build_qwen_command(settings) if settings.engine_variant == "qwen" else build_vllm_command(settings)
 
 
 class VllmEngine:
@@ -194,9 +308,11 @@ class VllmEngine:
                 "HF_XET_HIGH_PERFORMANCE": "1",
             }
         )
+        if self.settings.engine_variant == "voxtral":
+            environment["VLLM_DISABLE_COMPILE_CACHE"] = "1"
         try:
             self._process = await asyncio.create_subprocess_exec(
-                *build_vllm_command(self.settings),
+                *build_engine_command(self.settings),
                 env=environment,
             )
         except Exception as exc:
@@ -217,7 +333,8 @@ class VllmEngine:
                     self._error = f"vLLM exited with code {process.returncode}"
                     return
                 try:
-                    response = await client.get(f"{self.settings.internal_http_url}/health")
+                    health_path = "/" if self.settings.engine_variant == "qwen" else "/health"
+                    response = await client.get(f"{self.settings.internal_http_url}{health_path}")
                     if response.status_code == 200:
                         self._state = "ready"
                         self._loaded_at = time.time()
@@ -228,7 +345,7 @@ class VllmEngine:
                     pass
                 if time.monotonic() >= deadline:
                     self._state = "error"
-                    self._error = "vLLM model startup timed out"
+                    self._error = f"{self.settings.engine_variant} model startup timed out"
                     return
                 await asyncio.sleep(2)
         process = self._process
@@ -259,7 +376,7 @@ class VllmEngine:
         return {
             "state": self._state,
             "error": self._error,
-            "backend": "vllm-realtime",
+            "backend": "qwen-asr-streaming" if self.settings.engine_variant == "qwen" else "vllm-realtime",
             "variant": self.settings.engine_variant,
             "model": self.settings.model_name,
             "model_path": self.settings.model_id,
@@ -277,6 +394,8 @@ class VllmEngine:
     async def open_session(self) -> RealtimeSession:
         if self._state != "ready":
             raise EngineNotReady(self._error or f"model is {self._state}")
+        if self.settings.engine_variant == "qwen":
+            return await QwenSdkRealtimeSession.open(self.settings)
         return await VllmRealtimeSession.open(self.settings)
 
     async def transcribe_file(
@@ -298,6 +417,8 @@ class VllmEngine:
                 event = await asyncio.wait_for(session.receive(), timeout=300)
                 if event.get("type") == "transcription.delta":
                     text += str(event.get("delta", ""))
+                elif event.get("type") == "transcription.partial":
+                    text = str(event.get("text", text))
                 elif event.get("type") == "transcription.done":
                     text = str(event.get("text", text))
                     break
