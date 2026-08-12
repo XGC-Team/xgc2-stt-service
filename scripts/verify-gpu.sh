@@ -4,7 +4,7 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_dir}"
 
-port="${STT_PORT:-8000}"
+port="${STT_API_PORT:-34897}"
 base="http://127.0.0.1:${port}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "${tmp_dir}"' EXIT

@@ -166,6 +166,12 @@ wheels = [
 ]
 
 [[package]]
+name = "evdev"
+version = "1.9.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/f5/397b61091120a9ca5001041dd7bf76c385b3bfd67a0e5bcb74b852bd22a4/evdev-1.9.3.tar.gz", hash = "sha256:2c140e01ac8437758fa23fe5c871397412461f42d421aa20241dc8fe8cfccbc9", size = 32723, upload-time = "2026-02-05T21:54:24.987Z" }
+
+[[package]]
 name = "fastapi"
 version = "0.136.3"
 source = { registry = "https://pypi.org/simple" }
@@ -428,6 +434,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nvidia-ml-py"
+version = "13.610.43"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/b5/a8fbc356f768fa5c9cfd646668fd7d34bf55bdd1c6e20754642a64d930d4/nvidia_ml_py-13.610.43.tar.gz", hash = "sha256:65437eb73d68d0c62c931ca4d45038472faff03bd0b8729abba4b899f70d60f2", size = 52109, upload-time = "2026-06-01T18:54:08.829Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/23/45/caa600acfab94560807a20a64b5830d2cd3c3202b7f1328644d70b7d6bd8/nvidia_ml_py-13.610.43-py3-none-any.whl", hash = "sha256:f13c72698edef492f985cc225f14faafe68ae065a2e407f45bdf6f4b9b43fde8", size = 53163, upload-time = "2026-06-01T18:54:07.704Z" },
+]
+
+[[package]]
 name = "opencc-python-reimplemented"
 version = "0.1.7"
 source = { registry = "https://pypi.org/simple" }
@@ -603,6 +618,140 @@ wheels = [
 ]
 
 [[package]]
+name = "pynput"
+version = "1.8.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "evdev", marker = "'linux' in sys_platform" },
+    { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "python-xlib", marker = "'linux' in sys_platform" },
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/c6/e2d415610cfbc78308bee44218a46124aaa3301b1df08814df819b2254a1/pynput-1.8.2.tar.gz", hash = "sha256:f493c87157cd3861b4468f7f896857051762f44ed26f1b641e7cc5840a457087", size = 82818, upload-time = "2026-05-12T19:11:39.464Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/98/bbeb760852adb27f166ce1617f0e51aabb15f21b1e60ea703f2aed3c78ac/pynput-1.8.2-py2.py3-none-any.whl", hash = "sha256:8cc38cf13a6ab2749cb375678be8a0fd705d7ce49c8001ff5db4007a723bbef1", size = 92028, upload-time = "2026-05-12T19:11:37.89Z" },
+]
+
+[[package]]
+name = "pyobjc-core"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a5/78/abc4ce5920305780aeb36b4067a86253378b36e29ba96673a3deb02eb03a/pyobjc_core-12.2.2.tar.gz", hash = "sha256:3906452339cd06a3bb07df103c2511d4cb0f7a22d8771c0b802eba15d9a642b6", size = 1067701, upload-time = "2026-08-11T19:43:39.059Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/86/b2/bbf7f049880ab40d110e66f25122342a1f6c98d6fe3c59bb98985503c660/pyobjc_core-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:122e6ad302a2abf5d4d4adb0156db751600ddf2768441696cba17b31323085e7", size = 6427637, upload-time = "2026-08-11T14:51:36.038Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/ed/a8bf040caf3704023d74086b7fb96cf4ed2e844e24bd94e5248ba214b700/pyobjc_core-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:950bd2d9c74634398c4e3d24ef2f213d4e23d705083697464fa67afedc53c1ad", size = 6427113, upload-time = "2026-08-11T15:04:39.424Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/5a/760f8b9e116edd43c57e33844dc17619158fbdd311250d4209910192d72d/pyobjc_core-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:3772b406edb3ff78171530a17cda1c4a7817f87b87ded0d8715b3fa664df16db", size = 6666817, upload-time = "2026-08-11T19:30:17.01Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-applicationservices"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-coretext" },
+    { name = "pyobjc-framework-quartz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/40/b792ecc88a9fa639318509c127f0b153cd334bd27b47df373f4b7362a36d/pyobjc_framework_applicationservices-12.2.2.tar.gz", hash = "sha256:0bcc09531d5854598fd74706d999e4ae3b7c503204d318910d02eba30e8eecef", size = 109668, upload-time = "2026-08-11T19:43:45.347Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/00/ed/9d85751400f1cd23d71c824a57352ec4d216a8728255dc00c032c431d3ad/pyobjc_framework_applicationservices-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:5506bd6b5268a97fcb79b5b021f6cbbaaf5cdff3ec87094d8870268d8cf096ed", size = 32765, upload-time = "2026-08-11T19:30:56.696Z" },
+    { url = "https://files.pythonhosted.org/packages/b1/9d/fe660a822cc66a4261227b1597855c802b04dee56e5c8c153b9d5e6bcf0d/pyobjc_framework_applicationservices-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:3b5693a377480cf127caa1c8c835b8620896971029c545d99d01aa31a2c38159", size = 32787, upload-time = "2026-08-11T19:30:57.52Z" },
+    { url = "https://files.pythonhosted.org/packages/18/8c/deec4cdf8bc7b21bc2fb9e0e25e3cf99acb645d46207e8e6298a70b7f310/pyobjc_framework_applicationservices-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:93ba63aad6607f369c1b38bf91306731da6306fdde5eb67afa407b3f8a87dda7", size = 33043, upload-time = "2026-08-11T19:30:58.669Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-cocoa"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/75/76/49c6da2c6a831020b4854ba20079d5a1030474bffc776b7b73c2eeff8c15/pyobjc_framework_cocoa-12.2.2.tar.gz", hash = "sha256:c96c0ef69a71afbbb0e6a7d594b455c5fe47d62e0db376ee7a2b4b828c16ace9", size = 3132831, upload-time = "2026-08-11T19:44:02.288Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/2f/b67e73d8bc367e03fe7861cd9c49fff9dcfa6db83bc0630c0adcfb25b7fa/pyobjc_framework_cocoa-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:e106f395531e67694376b0f1184612cbeea3ec8b9bf56b55ef41d026171d2a2d", size = 388117, upload-time = "2026-08-11T19:32:43.161Z" },
+    { url = "https://files.pythonhosted.org/packages/db/e1/5d9b04ebb60042b9cb49adc2d33115e2f2c2e4ff7d548017bfaff8b7f536/pyobjc_framework_cocoa-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:600b1723184ca094931330e79355274949965460e23de38628d601b5a967baf9", size = 388181, upload-time = "2026-08-11T19:32:44.537Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/25/2a343357d5fe09bbe9c0e294dc03450866a0d6c1792fad36b6bcc00174c0/pyobjc_framework_cocoa-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:875f2aad73963faa81a6b36ae674fd494a4658d6d999e1075e0e2aca3d2391df", size = 392275, upload-time = "2026-08-11T19:32:45.631Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-coretext"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+    { name = "pyobjc-framework-quartz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6d/66/405006d3502ffcd3bc69e0b7249ab7c05a5b43a07fa3959ce6b2a84f3278/pyobjc_framework_coretext-12.2.2.tar.gz", hash = "sha256:64ddc02303217028e32e22c7cc00b5112d84e9d9a67c37d00c2e54f9172284ab", size = 97658, upload-time = "2026-08-11T19:44:17.207Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1c/88/e85a9268285fc0c28284dbdc869a27f5d3f2e436d2838221a6704b4f8eee/pyobjc_framework_coretext-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:a69611de569d92776e6391ca25492a5bbb4a05ba744006349e377a4fc5f7c8a5", size = 30120, upload-time = "2026-08-11T19:34:41.94Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/6d/e1a4c572c867bd40b705687c741a747083c6dbc63bd797bb6ed5c5108f6e/pyobjc_framework_coretext-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:dbd0f288a859e359ee8e7ccf45bc2c489f38ae1087c21468b61d700433e0c91b", size = 30117, upload-time = "2026-08-11T19:34:42.88Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/de/ffdf698b69a2b26af73d32ba1bcc06bc6efc0699f5936995017a66c42efb/pyobjc_framework_coretext-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:1324d91305022b1de03a12cf82de2b42c87dafe9b12cde6237253658a8637139", size = 30663, upload-time = "2026-08-11T19:34:43.635Z" },
+]
+
+[[package]]
+name = "pyobjc-framework-quartz"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/35/b1/426a37c7ae37280b3ffca2571fb48f211946aee2f4ca31a603ed1943c4a7/pyobjc_framework_quartz-12.2.2.tar.gz", hash = "sha256:810f97b210cfd93704d240860286dfd6df09f9f1c52525fc5c2166723aea3f9e", size = 3218295, upload-time = "2026-08-11T19:45:15.189Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/e4/8be95d2ff850f82fb55b44c63333a00a920bf8a73642e7d9c2f3638a26d2/pyobjc_framework_quartz-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:7f668979d0c7320bf8f7ed6e030da578f93ab0f5dd619b295ec735cd8d5faa34", size = 219003, upload-time = "2026-08-11T19:40:24.425Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/ae/b515852dbe491171f2f2e2eb7739588a5eb7f36720a739545337b8c0d706/pyobjc_framework_quartz-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:0ec9751904ef975bf0789d760dc4fadcb400edc4ffe4a736eb54971968babe5c", size = 219404, upload-time = "2026-08-11T19:40:25.461Z" },
+    { url = "https://files.pythonhosted.org/packages/ff/5f/c7ee66f4483385396d91f65036c62f3dd20bccaa07354643ef17b259aa75/pyobjc_framework_quartz-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:63f6f0f3233dcf650aac1374781e78961b0b17b33e3351953bacf8bd0c430593", size = 224462, upload-time = "2026-08-11T19:40:26.647Z" },
+]
+
+[[package]]
+name = "pyside6"
+version = "6.7.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyside6-addons" },
+    { name = "pyside6-essentials" },
+    { name = "shiboken6" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d4/34/86b0fd9b5ce8eee35bd1311a620e8cdfd56d0ca36edca314a6189336682d/PySide6-6.7.3-cp39-abi3-macosx_11_0_universal2.whl", hash = "sha256:1c21c4cf6cdd29bd13bbd7a2514756a19188eab992b92af03e64bf06a9b33d5b", size = 532108, upload-time = "2024-09-27T07:54:02.107Z" },
+    { url = "https://files.pythonhosted.org/packages/36/8a/af0c2c91bcd8a0003e4233a0c74dd6b0e5af5534e96185d48a2c03a8f359/PySide6-6.7.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:a21480cc746358f70768975fcc452322f03b3c3622625bfb1743b40ce4e24beb", size = 532727, upload-time = "2024-09-27T07:54:04.758Z" },
+    { url = "https://files.pythonhosted.org/packages/8a/56/a5347e273de35bd63fd3204bd9d80a134db959ff6f2bbeb299867dbe83db/PySide6-6.7.3-cp39-abi3-manylinux_2_31_aarch64.whl", hash = "sha256:c2a1313296c0088d1c3d231d0a8ccf0eda52b84139d0c4065fded76e4a4378f4", size = 532630, upload-time = "2024-09-27T07:54:07.145Z" },
+    { url = "https://files.pythonhosted.org/packages/69/f0/18c6b7f5087eec0d673eb8703c3e9eb76d62cfc427b015d4fc833287c1c4/PySide6-6.7.3-cp39-abi3-win_amd64.whl", hash = "sha256:3ac8dcb4ca82d276e319f89dd99098b01061f255a2b9104216504aece5e0faf8", size = 539981, upload-time = "2024-09-27T07:54:10.354Z" },
+]
+
+[[package]]
+name = "pyside6-addons"
+version = "6.7.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyside6-essentials" },
+    { name = "shiboken6" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/03/35/e4b69e36d3ffdb6818e546188a99ab2c2fe9834f7d06d57a47d9bfce8fd3/PySide6_Addons-6.7.3-cp39-abi3-macosx_11_0_universal2.whl", hash = "sha256:3174cb3a373c09c98740b452e8e8f4945d64cfa18ed8d43964111d570f0dc647", size = 292945102, upload-time = "2024-09-27T07:41:48.313Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/57/1b16719360c23ddf4aafffbb281fc5cd8949db42c868d0df1ac466814508/PySide6_Addons-6.7.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:bde1eb03dbffd089b50cd445847aaecaf4056cea84c49ea592d00f84f247251e", size = 138279265, upload-time = "2024-09-27T07:42:11.497Z" },
+    { url = "https://files.pythonhosted.org/packages/77/4d/547d8d5d7471a725b7221925266f5e8075bfd495f4d39156efdad4f59fa4/PySide6_Addons-6.7.3-cp39-abi3-manylinux_2_31_aarch64.whl", hash = "sha256:5a9e0df31345fe6caea677d916ea48b53ba86f95cc6499c57f89e392447ad6db", size = 123148721, upload-time = "2024-09-27T07:42:24.729Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/ca/1b34d0785298f86bed27582103760f67f7f78d9e2006405e256e9c770993/PySide6_Addons-6.7.3-cp39-abi3-win_amd64.whl", hash = "sha256:d8a19c2b2446407724c81c33ebf3217eaabd092f0f72da8130c17079e04a7813", size = 123578170, upload-time = "2024-09-27T07:42:41.047Z" },
+]
+
+[[package]]
+name = "pyside6-essentials"
+version = "6.7.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "shiboken6" },
+]
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bf/d8/053a3a95454ebc5313b3a4a9167b2f959fc6eaee3536b6e4269b75ce9716/PySide6_Essentials-6.7.3-cp39-abi3-macosx_11_0_universal2.whl", hash = "sha256:f9e08a4e9e7dc7b5ab72fde20abce8c97df7af1b802d9743f098f577dfe1f649", size = 158595022, upload-time = "2024-09-27T07:50:20.107Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/d8/a08ca6eca6839be5d604e4035ce899f9d6df0f612191f4ed4d03e51f1e0e/PySide6_Essentials-6.7.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:cda6fd26aead48f32e57f044d18aa75dc39265b49d7957f515ce7ac3989e7029", size = 90396416, upload-time = "2024-09-27T07:50:32.635Z" },
+    { url = "https://files.pythonhosted.org/packages/5c/4d/00a5716e56c35c5621368c89abb360f6e953e2be639cd5f11e8075894e41/PySide6_Essentials-6.7.3-cp39-abi3-manylinux_2_31_aarch64.whl", hash = "sha256:acdde06b74f26e7d26b4ae1461081b32a6cb17fcaa2a580050b5e0f0f12236c9", size = 87264397, upload-time = "2024-09-27T07:50:43.557Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/18/8679adff0b7a6ccacc2e0febd15c1b78d02abc0180b56007c24e94c9d582/PySide6_Essentials-6.7.3-cp39-abi3-win_amd64.whl", hash = "sha256:f0950fcdcbcd4f2443336dc6a5fe692172adc225f876839583503ded0ab2f2a7", size = 68887979, upload-time = "2024-09-27T07:50:52.56Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "8.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -634,6 +783,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5b/42/55c32bb9b12693c092ad250a0e82edb5b31ddeda6eb772de5f308b3804ad/python_multipart-0.0.32.tar.gz", hash = "sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e", size = 46881, upload-time = "2026-06-04T16:18:58.647Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e1/04/e8135ebd1ad02c56ec633277529b2602ff99ff634be76cdba5744cf554fd/python_multipart-0.0.32-py3-none-any.whl", hash = "sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23", size = 30042, upload-time = "2026-06-04T16:18:57.319Z" },
+]
+
+[[package]]
+name = "python-xlib"
+version = "0.33"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/86/f5/8c0653e5bb54e0cbdfe27bf32d41f27bc4e12faa8742778c17f2a71be2c0/python-xlib-0.33.tar.gz", hash = "sha256:55af7906a2c75ce6cb280a584776080602444f75815a7aff4d287bb2d7018b32", size = 269068, upload-time = "2022-12-25T18:53:00.824Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fc/b8/ff33610932e0ee81ae7f1269c890f697d56ff74b9f5b2ee5d9b7fa2c5355/python_xlib-0.33-py2.py3-none-any.whl", hash = "sha256:c3534038d42e0df2f1392a1b30a15a4ff5fdc2b86cfa94f072bf11b10a164398", size = 182185, upload-time = "2022-12-25T18:52:58.662Z" },
 ]
 
 [[package]]
@@ -811,6 +972,26 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/28/d3/bb25ee567ce2f61ac52430cf99f446b0e6d49bdfa4188699ad005fdd16aa/ruff-0.13.3-py3-none-win32.whl", hash = "sha256:f14e0d1fe6460f07814d03c6e32e815bff411505178a1f539a38f6097d3e8ee3", size = 12334488, upload-time = "2025-10-02T19:29:24.782Z" },
     { url = "https://files.pythonhosted.org/packages/cf/49/12f5955818a1139eed288753479ba9d996f6ea0b101784bb1fe6977ec128/ruff-0.13.3-py3-none-win_amd64.whl", hash = "sha256:621e2e5812b691d4f244638d693e640f188bacbb9bc793ddd46837cea0503dd2", size = 13455262, upload-time = "2025-10-02T19:29:26.882Z" },
     { url = "https://files.pythonhosted.org/packages/fe/72/7b83242b26627a00e3af70d0394d68f8f02750d642567af12983031777fc/ruff-0.13.3-py3-none-win_arm64.whl", hash = "sha256:9e9e9d699841eaf4c2c798fa783df2fabc680b72059a02ca0ed81c460bc58330", size = 12538484, upload-time = "2025-10-02T19:29:28.951Z" },
+]
+
+[[package]]
+name = "shiboken6"
+version = "6.7.3"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ef/7f/85d2234371fd260393760656e1f5977c0b6e270a0a6aca6bf7231a3e60de/shiboken6-6.7.3-cp39-abi3-macosx_11_0_universal2.whl", hash = "sha256:285fe3cf79be3135fe1ad1e2b9ff6db3a48698887425af6aa6ed7a05a9abc3d6", size = 388568, upload-time = "2024-09-27T07:51:06.762Z" },
+    { url = "https://files.pythonhosted.org/packages/b2/e9/5c0c67de510da7818703d01123f7998cc495e99c0e6979a6ed6eb2ee09d0/shiboken6-6.7.3-cp39-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:f0852e5781de78be5b13c140ec4c7fb9734e2aaf2986eb2d6a224363e03efccc", size = 189890, upload-time = "2024-09-27T07:51:08.983Z" },
+    { url = "https://files.pythonhosted.org/packages/ef/3c/bb524437df11ae79845b230d682b162935c7226b1fb7be2544dceca01e0f/shiboken6-6.7.3-cp39-abi3-manylinux_2_31_aarch64.whl", hash = "sha256:f0dd635178e64a45be2f84c9f33dd79ac30328da87f834f21a0baf69ae210e6e", size = 178147, upload-time = "2024-09-27T07:51:10.836Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/cc/e2b95aedb5e5f900c20325ef347e51c7750d18369d157f9b7da99943dae1/shiboken6-6.7.3-cp39-abi3-win_amd64.whl", hash = "sha256:5f29325dfa86fde0274240f1f38e421303749d3174ce3ada178715b5f4719db9", size = 1136685, upload-time = "2024-09-27T07:51:12.899Z" },
+]
+
+[[package]]
+name = "six"
+version = "1.17.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
 ]
 
 [[package]]
@@ -1090,6 +1271,7 @@ dependencies = [
     { name = "mistral-common", extra = ["audio"] },
     { name = "numpy", version = "2.3.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.13'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.13'" },
+    { name = "nvidia-ml-py" },
     { name = "opencc-python-reimplemented" },
     { name = "pydantic-settings" },
     { name = "python-multipart" },
@@ -1098,6 +1280,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+desktop = [
+    { name = "pynput" },
+    { name = "pyside6" },
+]
 dev = [
     { name = "httpx2" },
     { name = "pytest" },
@@ -1112,12 +1298,15 @@ requires-dist = [
     { name = "httpx2", marker = "extra == 'dev'", specifier = ">=2.10,<3" },
     { name = "mistral-common", extras = ["audio"], specifier = ">=1.9,<2" },
     { name = "numpy", specifier = ">=1.26,<3" },
+    { name = "nvidia-ml-py", specifier = ">=13,<14" },
     { name = "opencc-python-reimplemented", specifier = ">=0.1.7,<0.2" },
     { name = "pydantic-settings", specifier = "==2.15.0" },
+    { name = "pynput", marker = "extra == 'desktop'", specifier = ">=1.7.7,<1.9" },
+    { name = "pyside6", marker = "extra == 'desktop'", specifier = "==6.7.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4,<9" },
     { name = "python-multipart", specifier = "==0.0.32" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.13,<0.14" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.52.1" },
     { name = "websockets", specifier = ">=15,<18" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["dev", "desktop"]

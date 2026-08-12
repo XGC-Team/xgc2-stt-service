@@ -70,12 +70,141 @@ body,
   user-select: text;
 }
 
-.partial-text {
-  color: var(--color-text-muted);
+.stable-partial-text {
+  color: var(--color-text);
 }
 
-.runtime-panel {
+.partial-text {
+  padding-inline: var(--space-2);
+  color: var(--color-text-faint);
+  background: color-mix(in srgb, var(--color-bg-active) 72%, transparent);
+  border-radius: var(--radius-sm);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.runtime-panel,
+.gpu-panel,
+.api-panel {
   grid-column: 1 / -1;
+}
+
+.gpu-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.gpu-metric {
+  min-width: 0;
+  padding: var(--space-10) var(--space-12);
+  overflow: hidden;
+  border-right: var(--stroke-thin) solid var(--color-border);
+}
+
+.gpu-metric:last-child {
+  border-right: 0;
+}
+
+.gpu-metric > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.gpu-metric span {
+  color: var(--color-text-faint);
+  font-size: var(--font-sm);
+}
+
+.gpu-metric strong {
+  overflow: hidden;
+  color: var(--color-text-heading);
+  font-size: var(--font-lg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gpu-bar {
+  height: var(--space-3);
+  margin-top: var(--space-8);
+  overflow: hidden;
+  background: var(--color-bg-subtle);
+  border-radius: var(--radius-pill);
+}
+
+.gpu-bar i {
+  display: block;
+  height: 100%;
+  background: var(--color-border-primary);
+}
+
+.gpu-metric svg {
+  width: 100%;
+  height: 30px;
+  display: block;
+  margin-top: var(--space-4);
+}
+
+.gpu-metric polyline {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.api-key-table {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.api-key-row {
+  min-width: 720px;
+  display: grid;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(130px, 1fr) 70px 90px 55px minmax(150px, auto);
+  align-items: center;
+  gap: var(--space-10);
+  min-height: 38px;
+  padding: 0 var(--space-12);
+  border-bottom: var(--stroke-thin) solid var(--color-border);
+}
+
+.api-key-row:last-child {
+  border-bottom: 0;
+}
+
+.api-key-row[data-disabled='true'] {
+  opacity: var(--opacity-disabled);
+}
+
+.api-key-head {
+  min-height: 30px;
+  color: var(--color-text-faint);
+  background: var(--color-bg-subtle);
+  font-size: var(--font-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.api-key-row code {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.api-key-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-4);
+}
+
+.issued-key {
+  display: block;
+  padding: var(--space-12);
+  overflow-wrap: anywhere;
+  color: var(--color-text-heading);
+  background: var(--color-bg-subtle);
+  border: var(--stroke-thin) solid var(--color-border);
+  border-radius: var(--radius-surface);
+  font-family: var(--font-mono);
 }
 
 .runtime-grid {
@@ -126,6 +255,24 @@ body,
   gap: var(--space-14);
 }
 
+.settings-section {
+  display: grid;
+  gap: var(--space-10);
+  padding-bottom: var(--space-14);
+  border-bottom: var(--stroke-thin) solid var(--color-border);
+}
+
+.settings-section:last-of-type {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.settings-section h3 {
+  margin: 0;
+  color: var(--color-text-heading);
+  font-size: var(--font-base);
+}
+
 /* Remove after the batched shared-UI release exposes StatusText to consumers. */
 .stt-content .xgc-status-badge {
   padding: 0;
@@ -159,6 +306,23 @@ body,
     grid-column: auto;
   }
 
+  .gpu-panel,
+  .api-panel {
+    grid-column: auto;
+  }
+
+  .gpu-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .gpu-metric:nth-child(2) {
+    border-right: 0;
+  }
+
+  .gpu-metric:nth-child(-n + 2) {
+    border-bottom: var(--stroke-thin) solid var(--color-border);
+  }
+
   .runtime-grid {
     grid-template-columns: 1fr 1fr;
   }
@@ -181,6 +345,20 @@ body,
 }
 
 @media (max-width: 480px) {
+  .gpu-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gpu-metric,
+  .gpu-metric:nth-child(2) {
+    border-right: 0;
+    border-bottom: var(--stroke-thin) solid var(--color-border);
+  }
+
+  .gpu-metric:last-child {
+    border-bottom: 0;
+  }
+
   .runtime-grid {
     grid-template-columns: 1fr;
   }

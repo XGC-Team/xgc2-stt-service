@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     gpus: ${NVIDIA_VISIBLE_DEVICES:-all}
     ports:
-      - "${STT_BIND_ADDRESS:-0.0.0.0}:${STT_PORT:-8000}:8000"
+      - "${STT_WEB_BIND_ADDRESS:-127.0.0.1}:${STT_WEB_PORT:-34896}:8000"
     env_file:
       - path: .env
         required: false
@@ -31,6 +31,33 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10m
+
+  api:
+    image: ${STT_IMAGE:-ghcr.io/lxk36/xgc2-stt-service:voxtral-0.1.0}
+    container_name: xgc2-stt-api
+    restart: unless-stopped
+    depends_on:
+      stt:
+        condition: service_healthy
+    command: ["uvicorn", "xgc2_stt.api_proxy:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "${STT_API_BIND_ADDRESS:-0.0.0.0}:${STT_API_PORT:-34897}:8002"
+    environment:
+      STT_UPSTREAM_HTTP_URL: http://stt:8000
+      STT_UPSTREAM_WEBSOCKET_URL: ws://stt:8000
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8002/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   xgc2-stt-cache:

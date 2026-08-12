@@ -15,6 +15,7 @@ from xgc2_stt.engine import (
     _decode_audio_pcm16,
     build_qwen_command,
     build_vllm_command,
+    qwen_preview_parts,
 )
 
 
@@ -121,3 +122,24 @@ def test_qwen_session_emits_replaceable_partial_and_final() -> None:
         assert final["type"] == "transcription.done"
 
     asyncio.run(exercise())
+
+
+def test_qwen_preview_marks_only_the_recent_unfixed_window() -> None:
+    assert qwen_preview_parts(
+        "前面的内容已经稳定后面会修改",
+        chunk_count=4,
+        unfixed_chunk_num=4,
+        unfixed_token_num=5,
+    ) == ("", "前面的内容已经稳定后面会修改")
+    assert qwen_preview_parts(
+        "前面的内容已经稳定后面会修改",
+        chunk_count=5,
+        unfixed_chunk_num=4,
+        unfixed_token_num=5,
+    ) == ("前面的内容已经稳定", "后面会修改")
+    assert qwen_preview_parts(
+        "支持 network API 混合输入",
+        chunk_count=5,
+        unfixed_chunk_num=4,
+        unfixed_token_num=3,
+    ) == ("支持 network API 混", "合输入")

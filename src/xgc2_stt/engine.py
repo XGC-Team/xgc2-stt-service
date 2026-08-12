@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -134,7 +135,14 @@ class VllmRealtimeSession:
 class QwenSdkRealtimeSession:
     """Adapter for Qwen's official revision-capable streaming state API."""
 
-    def __init__(self, client: httpx.AsyncClient, session_id: str, chunk_bytes: int):
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        session_id: str,
+        chunk_bytes: int,
+        unfixed_chunk_num: int = 4,
+        unfixed_token_num: int = 5,
+    ):
         self.client = client
         self.session_id = session_id
         self.chunk_bytes = chunk_bytes
@@ -143,6 +151,9 @@ class QwenSdkRealtimeSession:
         self.last_text = ""
         self.language = ""
         self.finished = False
+        self.chunk_count = 0
+        self.unfixed_chunk_num = unfixed_chunk_num
+        self.unfixed_token_num = unfixed_token_num
 
     @classmethod
     async def open(cls, settings: Settings) -> QwenSdkRealtimeSession:
@@ -152,7 +163,13 @@ class QwenSdkRealtimeSession:
             response.raise_for_status()
             session_id = str(response.json()["session_id"])
             chunk_bytes = round(settings.qwen_chunk_size_seconds * 16000 * 2)
-            return cls(client, session_id, chunk_bytes)
+            return cls(
+                client,
+                session_id,
+                chunk_bytes,
+                settings.qwen_unfixed_chunk_num,
+                settings.qwen_unfixed_token_num,
+            )
         except Exception:
             await client.aclose()
             raise
@@ -167,6 +184,7 @@ class QwenSdkRealtimeSession:
             await self._send_chunk(chunk)
 
     async def _send_chunk(self, pcm: bytes) -> None:
+        self.chunk_count += 1
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
         samples *= 1.0 / 32768.0
         response = await self.client.post(
@@ -181,8 +199,21 @@ class QwenSdkRealtimeSession:
         text = str(payload.get("text") or "")
         if text != self.last_text:
             self.last_text = text
+            stable_text, unstable_text = qwen_preview_parts(
+                text,
+                chunk_count=self.chunk_count,
+                unfixed_chunk_num=self.unfixed_chunk_num,
+                unfixed_token_num=self.unfixed_token_num,
+            )
             await self.events.put(
-                {"type": "transcription.partial", "text": text, "language": self.language or None}
+                {
+                    "type": "transcription.partial",
+                    "text": text,
+                    "stable_text": stable_text,
+                    "unstable_text": unstable_text,
+                    "stability": "qwen-unfixed-window",
+                    "language": self.language or None,
+                }
             )
 
     async def commit(self) -> None:
@@ -215,6 +246,23 @@ class QwenSdkRealtimeSession:
                 await self.client.post("/api/finish", params={"session_id": self.session_id})
         self.finished = True
         await self.client.aclose()
+
+
+def qwen_preview_parts(
+    text: str,
+    *,
+    chunk_count: int,
+    unfixed_chunk_num: int,
+    unfixed_token_num: int,
+) -> tuple[str, str]:
+    """Expose Qwen's revisable suffix without claiming exact tokenizer boundaries."""
+    if chunk_count <= unfixed_chunk_num or not text:
+        return "", text
+    units = list(re.finditer(r"[\u3400-\u9fff]|[A-Za-z0-9_]+|[^\s]", text))
+    if len(units) <= unfixed_token_num:
+        return "", text
+    split_at = units[-unfixed_token_num].start()
+    return text[:split_at], text[split_at:]
 
 
 def build_vllm_command(settings: Settings) -> list[str]:
@@ -357,6 +405,7 @@ class VllmEngine:
 
     async def close(self) -> None:
         task = self._monitor_task
+        self._monitor_task = None
         if task is not None and not task.done():
             task.cancel()
             with suppress(asyncio.CancelledError):
@@ -371,6 +420,15 @@ class VllmEngine:
         except TimeoutError:
             process.kill()
             await process.wait()
+
+    async def reconfigure(self, settings: Settings) -> None:
+        await self.close()
+        self.settings = settings
+        self._state = "idle"
+        self._error = None
+        self._loaded_at = None
+        self._load_seconds = None
+        await self.start()
 
     def status(self) -> dict[str, Any]:
         return {

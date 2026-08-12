@@ -14,6 +14,7 @@ dependencies = [
   "fastapi>=0.133,<0.137",
   "httpx>=0.28,<0.29",
   "mistral-common[audio]>=1.9,<2",
+  "nvidia-ml-py>=13,<14",
   "numpy>=1.26,<3",
   "opencc-python-reimplemented>=0.1.7,<0.2",
   "pydantic-settings==2.15.0",
@@ -28,6 +29,13 @@ dev = [
   "pytest>=8.4,<9",
   "ruff>=0.13,<0.14",
 ]
+desktop = [
+  "PySide6==6.7.3",
+  "pynput>=1.7.7,<1.9",
+]
+
+[project.scripts]
+xgc2-stt-client = "xgc2_stt.desktop:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xgc2_stt"]

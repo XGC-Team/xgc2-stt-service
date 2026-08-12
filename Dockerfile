@@ -27,6 +27,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tini; \
     rm -rf /var/lib/apt/lists/*
+RUN useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -83,6 +84,7 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl tini sox libsox-fmt-all; \
     rm -rf /var/lib/apt/lists/*
+RUN useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -121,16 +123,22 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "xgc2_stt.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-FROM qwen-base AS qwen
-
+FROM ${QWEN_VLLM_IMAGE} AS qwen-weights
 ARG QWEN_MODEL=Qwen/Qwen3-ASR-1.7B
 ARG QWEN_REVISION=7278e1e70fe206f11671096ffdd38061171dd6e5
 
 USER root
 RUN --mount=type=cache,target=/root/.cache/huggingface \
     HF_HOME=/root/.cache/huggingface python3 -c \
-      "from huggingface_hub import snapshot_download; snapshot_download('${QWEN_MODEL}', revision='${QWEN_REVISION}', local_dir='/opt/xgc2-stt/models/qwen')"; \
-    chown -R 2000:0 /opt/xgc2-stt/models/qwen
+      "from huggingface_hub import snapshot_download; snapshot_download('${QWEN_MODEL}', revision='${QWEN_REVISION}', local_dir='/opt/xgc2-stt/models/qwen')"
+
+FROM qwen-base AS qwen
+
+ARG QWEN_MODEL=Qwen/Qwen3-ASR-1.7B
+ARG QWEN_REVISION=7278e1e70fe206f11671096ffdd38061171dd6e5
+
+USER root
+COPY --from=qwen-weights --chown=2000:0 /opt/xgc2-stt/models/qwen/ /opt/xgc2-stt/models/qwen/
 
 ENV STT_ENGINE_VARIANT=qwen \
     STT_MODEL_ID=/opt/xgc2-stt/models/qwen \
@@ -146,16 +154,22 @@ LABEL org.opencontainers.image.title="XGC2 STT Qwen" \
 
 USER 2000:0
 
-FROM base AS voxtral
-
+FROM ${VLLM_IMAGE} AS voxtral-weights
 ARG VOXTRAL_MODEL=mistralai/Voxtral-Mini-4B-Realtime-2602
 ARG VOXTRAL_REVISION=2769294da9567371363522aac9bbcfdd19447add
 
 USER root
 RUN --mount=type=cache,target=/root/.cache/huggingface \
     HF_HOME=/root/.cache/huggingface python3 -c \
-      "from huggingface_hub import snapshot_download; snapshot_download('${VOXTRAL_MODEL}', revision='${VOXTRAL_REVISION}', local_dir='/opt/xgc2-stt/models/voxtral', ignore_patterns=['model.safetensors', '.gitattributes'])"; \
-    chown -R 2000:0 /opt/xgc2-stt/models/voxtral
+      "from huggingface_hub import snapshot_download; snapshot_download('${VOXTRAL_MODEL}', revision='${VOXTRAL_REVISION}', local_dir='/opt/xgc2-stt/models/voxtral', ignore_patterns=['model.safetensors', '.gitattributes'])"
+
+FROM base AS voxtral
+
+ARG VOXTRAL_MODEL=mistralai/Voxtral-Mini-4B-Realtime-2602
+ARG VOXTRAL_REVISION=2769294da9567371363522aac9bbcfdd19447add
+
+USER root
+COPY --from=voxtral-weights --chown=2000:0 /opt/xgc2-stt/models/voxtral/ /opt/xgc2-stt/models/voxtral/
 
 ENV STT_ENGINE_VARIANT=voxtral \
     STT_MODEL_ID=/opt/xgc2-stt/models/voxtral \

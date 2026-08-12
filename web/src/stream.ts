@@ -5,6 +5,12 @@ export interface StreamEvent {
   session_id?: string
   sequence?: number
   text?: string
+  stable_text?: string
+  unstable_text?: string
+  stability?: string
+  session_complete?: boolean
+  segment_index?: number
+  reason?: string
   message?: string
   state?: string
   audio_seconds?: number
@@ -15,12 +21,16 @@ export type AudioLevelListener = (levels: readonly number[]) => void
 
 export class MicrophoneStream {
   private socket: WebSocket | null = null
+  private connection: ConnectionSettings | null = null
+  private eventListener: ((event: StreamEvent) => void) | null = null
+  private closeListener: ((reason: string) => void) | null = null
   private media: MediaStream | null = null
   private context: AudioContext | null = null
   private source: MediaStreamAudioSourceNode | null = null
   private capture: AudioWorkletNode | null = null
   private sink: GainNode | null = null
   private onLevels: AudioLevelListener | null = null
+  private pendingPcm: ArrayBuffer[] = []
 
   async start(
     connection: ConnectionSettings,
@@ -31,46 +41,21 @@ export class MicrophoneStream {
     if (!window.isSecureContext) {
       throw new Error('麦克风需要 HTTPS；仅 localhost 可使用 HTTP')
     }
-    const query = new URLSearchParams({
-      sample_rate: '16000',
-      output_script: connection.outputScript,
-      trim_leading_silence: connection.trimLeadingSilence ? '1' : '0',
-    })
-    if (connection.apiKey) query.set('access_token', connection.apiKey)
-    const socket = new WebSocket(websocketUrl(connection, query))
-    socket.binaryType = 'arraybuffer'
-    this.socket = socket
+    this.connection = connection
+    this.eventListener = onEvent
+    this.closeListener = onClose
     this.onLevels = onLevels ?? null
+    let socket: WebSocket
     try {
-      await new Promise<void>((resolve, reject) => {
-        const timeout = window.setTimeout(() => reject(new Error('WebSocket 连接超时')), 10_000)
-        socket.addEventListener('open', () => {
-          window.clearTimeout(timeout)
-          resolve()
-        }, { once: true })
-        socket.addEventListener('error', () => {
-          window.clearTimeout(timeout)
-          reject(new Error('WebSocket 连接失败'))
-        }, { once: true })
-      })
+      socket = await this.connectSocket()
     } catch (error) {
-      this.socket = null
+      this.connection = null
+      this.eventListener = null
+      this.closeListener = null
       this.onLevels?.([])
       this.onLevels = null
       throw error
     }
-    socket.addEventListener('message', (message) => {
-      if (typeof message.data !== 'string') return
-      try {
-        onEvent(JSON.parse(message.data) as StreamEvent)
-      } catch {
-        onEvent({ type: 'error', message: '服务返回了无效事件' })
-      }
-    })
-    socket.addEventListener('close', (event) => {
-      void this.releaseAudio()
-      onClose(event.reason || `连接已关闭 (${event.code})`)
-    })
 
     try {
       this.media = await navigator.mediaDevices.getUserMedia({
@@ -91,18 +76,69 @@ export class MicrophoneStream {
       this.sink.gain.value = 0
       this.capture.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
         this.onLevels?.(pcmWaveformLevels(event.data))
-        if (socket.readyState === WebSocket.OPEN) socket.send(event.data)
+        const activeSocket = this.socket
+        if (activeSocket?.readyState === WebSocket.OPEN) {
+          activeSocket.send(event.data)
+        } else if (activeSocket) {
+          this.pendingPcm.push(event.data)
+          if (this.pendingPcm.length > 50) this.pendingPcm.shift()
+        }
       }
       this.source.connect(this.capture)
       this.capture.connect(this.sink)
       this.sink.connect(this.context.destination)
     } catch (error) {
-      // Browsers only allow clients to close with 1000 or an application code
-      // in the 3000-4999 range. 1011 is reserved for server-side failures.
+      this.socket = null
       socket.close(4001, 'microphone unavailable')
       await this.releaseAudio()
       throw error
     }
+  }
+
+  private async connectSocket(): Promise<WebSocket> {
+    const connection = this.connection
+    if (!connection || !this.eventListener || !this.closeListener) throw new Error('录音会话尚未初始化')
+    const query = new URLSearchParams({
+      sample_rate: '16000',
+      output_script: connection.outputScript,
+      trim_leading_silence: connection.trimLeadingSilence ? '1' : '0',
+    })
+    if (connection.apiKey) query.set('access_token', connection.apiKey)
+    const socket = new WebSocket(websocketUrl(connection, query))
+    socket.binaryType = 'arraybuffer'
+    this.socket = socket
+    socket.addEventListener('message', (message) => {
+      if (this.socket !== socket || typeof message.data !== 'string') return
+      try {
+        this.eventListener?.(JSON.parse(message.data) as StreamEvent)
+      } catch {
+        this.eventListener?.({ type: 'error', message: '服务返回了无效事件' })
+      }
+    })
+    socket.addEventListener('close', (event) => {
+      if (this.socket !== socket) return
+      this.socket = null
+      void this.releaseAudio()
+      this.closeListener?.(event.reason || `连接已关闭 (${event.code})`)
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error('WebSocket 连接超时')), 10_000)
+        socket.addEventListener('open', () => {
+          window.clearTimeout(timeout)
+          for (const chunk of this.pendingPcm.splice(0)) socket.send(chunk)
+          resolve()
+        }, { once: true })
+        socket.addEventListener('error', () => {
+          window.clearTimeout(timeout)
+          reject(new Error('WebSocket 连接失败'))
+        }, { once: true })
+      })
+    } catch (error) {
+      if (this.socket === socket) this.socket = null
+      throw error
+    }
+    return socket
   }
 
   async stop(): Promise<void> {
@@ -111,10 +147,35 @@ export class MicrophoneStream {
   }
 
   close(): void {
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      this.socket.send(JSON.stringify({ type: 'close' }))
-    }
+    const socket = this.socket
     this.socket = null
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: 'close' }))
+    }
+    this.connection = null
+    this.eventListener = null
+    this.closeListener = null
+    this.pendingPcm = []
+  }
+
+  async clearSession(): Promise<void> {
+    if (!this.connection || !this.eventListener || !this.closeListener) return
+    const previous = this.socket
+    this.socket = null
+    this.pendingPcm = []
+    if (previous && previous.readyState !== WebSocket.CLOSED) {
+      const closed = new Promise<void>((resolve) => {
+        const timeout = window.setTimeout(resolve, 1_000)
+        previous.addEventListener('close', () => {
+          window.clearTimeout(timeout)
+          resolve()
+        }, { once: true })
+      })
+      if (previous.readyState === WebSocket.OPEN) previous.send(JSON.stringify({ type: 'reset' }))
+      previous.close(1000, 'cleared')
+      await closed
+    }
+    await this.connectSocket()
   }
 
   async cancel(): Promise<void> {
@@ -125,6 +186,10 @@ export class MicrophoneStream {
       socket.close(1000, 'cancelled')
     }
     await this.releaseAudio()
+    this.connection = null
+    this.eventListener = null
+    this.closeListener = null
+    this.pendingPcm = []
   }
 
   private async releaseAudio(): Promise<void> {

@@ -23,6 +23,7 @@ def main() -> int:
     uri = urlunparse(("wss" if base.scheme == "https" else "ws", base.netloc, "/v1/stream", "", query, ""))
 
     partials: list[tuple[float, str]] = []
+    finals: list[dict[str, object]] = []
     final = ""
     final_at = 0.0
     failure: list[BaseException] = []
@@ -43,9 +44,11 @@ def main() -> int:
                     if event.get("type") == "transcript.partial" and event.get("text"):
                         partials.append((received_at, str(event["text"])))
                     if event.get("type") == "transcript.final":
+                        finals.append(event)
                         final = str(event.get("text", ""))
                         final_at = received_at
-                        return
+                        if event.get("session_complete", True):
+                            return
                     if event.get("type") == "error":
                         raise RuntimeError(f"stream returned an error: {event}")
             except BaseException as exc:
@@ -77,11 +80,26 @@ def main() -> int:
     partials_before_commit = sum(received_at <= commit_sent_at for received_at, _ in partials)
     if partials_before_commit == 0:
         raise RuntimeError("stream returned no partial transcript while audio was still being captured")
+    partial_revisions = 0
+    max_rewrite_characters = 0
+    for (_, previous), (_, current) in zip(partials, partials[1:], strict=False):
+        common_prefix = 0
+        for before, after in zip(previous, current, strict=False):
+            if before != after:
+                break
+            common_prefix += 1
+        if common_prefix < len(previous):
+            partial_revisions += 1
+            max_rewrite_characters = max(max_rewrite_characters, len(previous) - common_prefix)
     result = {
         "audio_seconds": round(sent_audio_seconds, 3),
         "first_partial_seconds": round(partials[0][0] - audio_started_at, 3),
         "partials": len(partials),
         "partials_before_commit": partials_before_commit,
+        "partial_revisions": partial_revisions,
+        "max_rewrite_characters": max_rewrite_characters,
+        "partial_trace": [text for _, text in partials],
+        "segment_finals": len(finals),
         "final_after_commit_seconds": round(final_at - commit_sent_at, 3),
         "final": final,
     }

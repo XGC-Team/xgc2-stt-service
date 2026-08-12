@@ -49,6 +49,14 @@ class FakeEngine:
         return transcript("uploaded speech", language or "zh")
 
 
+class ReconfigurableFakeEngine(FakeEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.reconfigured: Settings | None = None
+
+    async def reconfigure(self, updated: Settings) -> None:
+        self.reconfigured = updated
+
 
 class FakeRealtimeSession:
     def __init__(self) -> None:
@@ -85,6 +93,9 @@ def transcript(text: str, language: str) -> Transcript:
 def settings(tmp_path: Path, **overrides: Any) -> Settings:
     values: dict[str, Any] = {
         "web_dist": str(tmp_path / "missing-web"),
+        "api_key_store_path": str(tmp_path / "api-keys.json"),
+        "runtime_settings_path": str(tmp_path / "runtime-settings.json"),
+        "gpu_metrics_enabled": False,
     }
     values.update(overrides)
     return Settings(**values)
@@ -101,6 +112,10 @@ def test_health_status_and_model_contract(tmp_path: Path) -> None:
         assert status["engine"]["cuda_devices"] == 1
         assert status["stream"]["format"] == "pcm_s16le"
         assert status["stream"]["protocol"] == "openai-realtime"
+        assert status["stream"]["finalization"] == "silence-or-manual"
+        assert status["stream"]["silence_commit_ms"] == 3000
+        assert status["stream"]["active"] == 0
+        assert status["stream"]["capacity"] == 1
         models = client.get("/v1/models").json()
         assert models["data"][0]["aliases"] == ["whisper-1", "stt-1"]
     assert engine.started and engine.closed
@@ -159,14 +174,99 @@ def test_upload_limits_and_model_validation(tmp_path: Path) -> None:
         assert invalid_model.status_code == 400
 
 
+def test_upload_setup_failure_releases_capacity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_tempfile(*args: Any, **kwargs: Any) -> tuple[int, str]:
+        raise OSError("temporary storage unavailable")
+
+    monkeypatch.setattr("xgc2_stt.main.tempfile.mkstemp", fail_tempfile)
+    app = create_app(settings(tmp_path, max_active_streams=1), FakeEngine())
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/v1/audio/transcriptions",
+            files={"file": ("sample.wav", b"data", "audio/wav")},
+        )
+        assert response.status_code == 500
+        assert client.get("/api/status").json()["stream"]["active"] == 0
+
+
 def test_api_key_guards_http_and_websocket(tmp_path: Path) -> None:
     app = create_app(settings(tmp_path, api_key="secret"), FakeEngine())
     with TestClient(app) as client:
-        assert client.get("/api/status").status_code == 401
-        assert client.get("/api/status", headers={"Authorization": "Bearer secret"}).status_code == 200
+        assert client.get("/api/status").status_code == 200
+        assert client.get("/v1/models").status_code == 401
+        assert client.get("/v1/models", headers={"Authorization": "Bearer secret"}).status_code == 200
         with pytest.raises(WebSocketDisconnect) as error, client.websocket_connect("/v1/stream"):
             pass
         assert error.value.code == 4401
+
+
+def test_managed_api_keys_are_returned_once_and_usage_is_counted(tmp_path: Path) -> None:
+    app = create_app(settings(tmp_path), FakeEngine())
+    with TestClient(app) as client:
+        created = client.post("/api/keys", json={"name": "terminal"})
+        assert created.status_code == 201
+        key_id = created.json()["key"]["id"]
+        secret = created.json()["secret"]
+        assert secret.startswith("xgc2_sk_")
+        listed = client.get("/api/keys").json()["keys"]
+        assert listed[0]["id"] == key_id
+        assert "digest" not in listed[0]
+        assert "secret" not in listed[0]
+        assert client.get("/v1/models").status_code == 401
+        headers = {"Authorization": f"Bearer {secret}"}
+        assert client.get("/v1/models", headers=headers).status_code == 200
+        with client.websocket_connect(f"/v1/stream?access_token={secret}") as socket:
+            assert socket.receive_json()["type"] == "session.started"
+            socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 4000)
+            assert socket.receive_json()["type"] == "transcript.partial"
+            socket.send_text('{"type":"commit"}')
+            assert socket.receive_json()["session_complete"] is True
+        usage = client.get("/api/keys").json()["keys"][0]
+        assert usage["request_count"] == 2
+        assert usage["stream_sessions"] == 1
+        assert usage["audio_bytes"] == 8000
+        assert usage["audio_seconds"] == 0.25
+        assert usage["active_sessions"] == 0
+
+        rotated = client.post(f"/api/keys/{key_id}/rotate").json()["secret"]
+        assert client.get("/v1/models", headers=headers).status_code == 401
+        assert client.get("/v1/models", headers={"X-API-Key": rotated}).status_code == 200
+        assert client.delete(f"/api/keys/{key_id}").status_code == 200
+        assert client.get("/v1/models", headers={"X-API-Key": rotated}).status_code == 401
+
+
+def test_corrupt_managed_key_store_fails_closed(tmp_path: Path) -> None:
+    key_store = tmp_path / "api-keys.json"
+    key_store.write_text("{not-json", encoding="utf-8")
+    app = create_app(settings(tmp_path, api_key_store_path=str(key_store)), FakeEngine())
+
+    with TestClient(app) as client:
+        assert client.get("/api/keys").json()["authentication"] == "api-key"
+        assert client.get("/v1/models").status_code == 401
+        recovery = client.post("/api/keys", json={"name": "recovery"})
+        secret = recovery.json()["secret"]
+        assert client.get("/v1/models", headers={"Authorization": f"Bearer {secret}"}).status_code == 200
+
+
+def test_runtime_settings_distinguish_hot_changes_from_model_restart(tmp_path: Path) -> None:
+    engine = ReconfigurableFakeEngine()
+    app = create_app(settings(tmp_path), engine)
+    with TestClient(app) as client:
+        current = client.get("/api/settings").json()
+        assert current["values"]["silence_commit_ms"] == 3000
+        hot = client.put("/api/settings", json={"silence_commit_ms": 2500, "max_active_streams": 2})
+        assert hot.status_code == 200
+        assert hot.json()["restart_required"] is False
+        assert client.get("/api/status").json()["stream"]["capacity"] == 2
+
+        pending = client.put("/api/settings", json={"gpu_memory_utilization": 0.7})
+        assert pending.json()["restart_required"] is True
+        assert pending.json()["pending"] == {"gpu_memory_utilization": 0.7}
+        restarted = client.post("/api/engine/restart")
+        assert restarted.status_code == 202
+        assert restarted.json()["restart_required"] is False
+        assert engine.reconfigured is not None
+        assert engine.reconfigured.gpu_memory_utilization == 0.7
 
 
 def test_stream_emits_partial_and_final_events(tmp_path: Path) -> None:
@@ -203,3 +303,48 @@ def test_stream_rejects_invalid_recognition_settings(tmp_path: Path) -> None:
             error = socket.receive_json()
             assert error["code"] == "invalid_trim_leading_silence"
     assert engine.sessions == []
+
+
+def test_stream_rejects_a_second_active_session(tmp_path: Path) -> None:
+    engine = FakeEngine()
+    with (
+        TestClient(create_app(settings(tmp_path, max_active_streams=1), engine)) as client,
+        client.websocket_connect("/v1/stream") as first,
+    ):
+        assert first.receive_json()["type"] == "session.started"
+        assert client.get("/api/status").json()["stream"]["active"] == 1
+        with client.websocket_connect("/v1/stream") as second:
+            busy = second.receive_json()
+            assert busy["type"] == "error"
+            assert busy["code"] == "server_busy"
+            assert busy["active"] == 1
+            assert busy["capacity"] == 1
+
+
+def test_silence_finalizes_a_segment_without_closing_the_stream(tmp_path: Path) -> None:
+    engine = FakeEngine()
+    with (
+        TestClient(create_app(settings(tmp_path, silence_commit_ms=3000), engine)) as client,
+        client.websocket_connect("/v1/stream") as socket,
+    ):
+        assert socket.receive_json()["type"] == "session.started"
+        socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 8000)
+        assert socket.receive_json()["type"] == "transcript.partial"
+        socket.send_bytes((0).to_bytes(2, "little", signed=True) * (16000 * 3))
+        while True:
+            first_final = socket.receive_json()
+            if first_final["type"] == "transcript.final":
+                break
+        assert first_final["reason"] == "silence"
+        assert first_final["session_complete"] is False
+        assert first_final["segment_index"] == 0
+
+        socket.send_bytes((1200).to_bytes(2, "little", signed=True) * 8000)
+        assert socket.receive_json()["type"] == "transcript.partial"
+        socket.send_text('{"type":"commit"}')
+        second_final = socket.receive_json()
+        assert second_final["type"] == "transcript.final"
+        assert second_final["reason"] == "commit"
+        assert second_final["session_complete"] is True
+        assert second_final["segment_index"] == 1
+    assert len(engine.sessions) == 2
