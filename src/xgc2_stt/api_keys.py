@@ -22,10 +22,27 @@ def _digest(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
+_REQUIRED_RECORD_FIELDS = frozenset(
+    {
+        "id",
+        "name",
+        "prefix",
+        "digest",
+        "created_at",
+        "last_used_at",
+        "request_count",
+        "stream_sessions",
+        "audio_bytes",
+        "audio_seconds",
+        "active_sessions",
+        "enabled",
+    }
+)
+
+
 class ApiKeyStore:
-    def __init__(self, path: str, legacy_secret: str | None = None):
+    def __init__(self, path: str):
         self.path = Path(path)
-        self.legacy_secret = legacy_secret
         self._records: dict[str, dict[str, Any]] = {}
         self._managed_authentication = False
         self._lock = threading.RLock()
@@ -47,15 +64,13 @@ class ApiKeyStore:
     @property
     def requires_authentication(self) -> bool:
         with self._lock:
-            return bool(self.legacy_secret) or self._managed_authentication
+            return self._managed_authentication
 
     def authenticate(self, candidate: str | None) -> str | None:
         if not self.requires_authentication:
             return "trusted-network"
         if not candidate:
             return None
-        if self.legacy_secret and hmac.compare_digest(self.legacy_secret, candidate):
-            return "legacy"
         candidate_digest = _digest(candidate)
         with self._lock:
             for key_id, record in self._records.items():
@@ -169,30 +184,51 @@ class ApiKeyStore:
         except FileNotFoundError:
             return
         except (json.JSONDecodeError, OSError):
-            with self._lock:
-                self._managed_authentication = True
+            self._fail_closed()
             return
-        if not isinstance(payload, dict):
-            with self._lock:
-                self._managed_authentication = True
+        if (
+            not isinstance(payload, dict)
+            or payload.get("schema_version") != 1
+            or not isinstance(payload.get("authentication_enabled"), bool)
+            or not isinstance(payload.get("keys"), list)
+        ):
+            self._fail_closed()
             return
-        records = payload.get("keys", [])
-        if not isinstance(records, list):
-            records = []
+        records = payload["keys"]
+        if not all(self._valid_record(record) for record in records):
+            self._fail_closed()
+            return
         with self._lock:
             self._records = {
                 str(record["id"]): record
                 for record in records
-                if isinstance(record, dict) and record.get("id") and record.get("digest")
             }
-            self._managed_authentication = bool(payload.get("authentication_enabled", self._records))
+            self._managed_authentication = payload["authentication_enabled"]
             for record in self._records.values():
-                if "audio_seconds" not in record:
-                    record["audio_seconds"] = round(int(record.get("audio_bytes", 0)) / 32_000, 3)
-                    self._dirty = True
                 if record.get("active_sessions"):
                     record["active_sessions"] = 0
                     self._dirty = True
+
+    def _fail_closed(self) -> None:
+        with self._lock:
+            self._records = {}
+            self._managed_authentication = True
+
+    @staticmethod
+    def _valid_record(record: object) -> bool:
+        if not isinstance(record, dict) or not _REQUIRED_RECORD_FIELDS.issubset(record):
+            return False
+        digest = record.get("digest")
+        return (
+            isinstance(record.get("id"), str)
+            and bool(record["id"])
+            and isinstance(record.get("name"), str)
+            and isinstance(record.get("prefix"), str)
+            and isinstance(digest, str)
+            and len(digest) == 64
+            and all(character in "0123456789abcdef" for character in digest)
+            and isinstance(record.get("enabled"), bool)
+        )
 
     def flush(self) -> None:
         with self._flush_lock:

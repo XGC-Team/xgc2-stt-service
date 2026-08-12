@@ -199,13 +199,16 @@ async def handle_stream(
         is_speech = LeadingSilenceGate.rms(chunk) >= silence_threshold
         if not speech_started:
             outgoing = leading_silence_gate.push(chunk) if leading_silence_gate is not None else chunk
-            if not outgoing or not is_speech:
+            if not outgoing:
                 return True
             if upstream is None and not await open_upstream():
                 return False
             speech_started = True
-            silence_seconds = 0.0
+            silence_seconds = 0.0 if is_speech else len(chunk) / (16_000 * 2)
             await upstream.send_pcm(outgoing)
+            if silence_seconds * 1000 >= silence_commit_ms:
+                upstream_committing = True
+                await upstream.commit()
             return True
 
         if upstream is None and not await open_upstream():

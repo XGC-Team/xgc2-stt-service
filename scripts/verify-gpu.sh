@@ -16,8 +16,8 @@ curl -fsSL \
   -o "${tmp_dir}/asr-zh.wav"
 
 curl_args=(-fsS "${base}/v1/audio/transcriptions")
-if [ -n "${STT_API_KEY:-}" ]; then
-  curl_args+=(-H "Authorization: Bearer ${STT_API_KEY}")
+if [ -n "${XGC2_STT_API_KEY:-}" ]; then
+  curl_args+=(-H "Authorization: Bearer ${XGC2_STT_API_KEY}")
 fi
 response="$(curl "${curl_args[@]}" \
   -F "file=@${tmp_dir}/asr-zh.wav" \

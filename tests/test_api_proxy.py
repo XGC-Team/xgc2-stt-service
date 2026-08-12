@@ -26,6 +26,7 @@ def test_api_proxy_exposes_only_api_routes_and_forwards_credentials() -> None:
         "ws://stt.test:8000",
         transport=httpx.MockTransport(upstream),
     )
+    assert all(getattr(route, "path", None) != "/v1/stream" for route in app.routes)
     with TestClient(app) as client:
         assert client.get("/").status_code == 404
         assert client.get("/api/status").status_code == 404

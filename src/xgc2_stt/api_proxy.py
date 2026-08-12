@@ -162,7 +162,6 @@ def create_api_proxy(
                 await websocket.close(code=1000)
 
     app.websocket("/v1/audio/transcriptions/stream")(forward_websocket)
-    app.websocket("/v1/stream")(forward_websocket)
     return app
 
 

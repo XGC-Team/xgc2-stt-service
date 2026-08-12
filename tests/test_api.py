@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from xgc2_stt.api_keys import ApiKeyStore
 from xgc2_stt.config import Settings
 from xgc2_stt.engine import Transcript, TranscriptSegment
 from xgc2_stt.main import create_app
@@ -190,12 +191,16 @@ def test_upload_setup_failure_releases_capacity(tmp_path: Path, monkeypatch: pyt
 
 
 def test_api_key_guards_http_and_websocket(tmp_path: Path) -> None:
-    app = create_app(settings(tmp_path, api_key="secret"), FakeEngine())
+    key_store = ApiKeyStore(str(tmp_path / "api-keys.json"))
+    _, secret = key_store.create("guard")
+    app = create_app(settings(tmp_path), FakeEngine(), api_keys=key_store)
     with TestClient(app) as client:
         assert client.get("/api/status").status_code == 200
         assert client.get("/v1/models").status_code == 401
-        assert client.get("/v1/models", headers={"Authorization": "Bearer secret"}).status_code == 200
-        with pytest.raises(WebSocketDisconnect) as error, client.websocket_connect("/v1/stream"):
+        assert client.get("/v1/models", headers={"Authorization": f"Bearer {secret}"}).status_code == 200
+        with pytest.raises(WebSocketDisconnect) as error, client.websocket_connect(
+            "/v1/audio/transcriptions/stream"
+        ):
             pass
         assert error.value.code == 4401
 
@@ -215,7 +220,7 @@ def test_managed_api_keys_are_returned_once_and_usage_is_counted(tmp_path: Path)
         assert client.get("/v1/models").status_code == 401
         headers = {"Authorization": f"Bearer {secret}"}
         assert client.get("/v1/models", headers=headers).status_code == 200
-        with client.websocket_connect(f"/v1/stream?access_token={secret}") as socket:
+        with client.websocket_connect(f"/v1/audio/transcriptions/stream?access_token={secret}") as socket:
             assert socket.receive_json()["type"] == "session.started"
             socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 4000)
             assert socket.receive_json()["type"] == "transcript.partial"
@@ -246,6 +251,16 @@ def test_corrupt_managed_key_store_fails_closed(tmp_path: Path) -> None:
         recovery = client.post("/api/keys", json={"name": "recovery"})
         secret = recovery.json()["secret"]
         assert client.get("/v1/models", headers={"Authorization": f"Bearer {secret}"}).status_code == 200
+
+
+def test_pre_schema_managed_key_store_is_rejected_without_migration(tmp_path: Path) -> None:
+    key_store = tmp_path / "api-keys.json"
+    key_store.write_text('{"authentication_enabled":false,"keys":[]}', encoding="utf-8")
+    app = create_app(settings(tmp_path, api_key_store_path=str(key_store)), FakeEngine())
+
+    with TestClient(app) as client:
+        assert client.get("/api/keys").json() == {"authentication": "api-key", "keys": []}
+        assert client.get("/v1/models").status_code == 401
 
 
 def test_runtime_settings_distinguish_hot_changes_from_model_restart(tmp_path: Path) -> None:
@@ -292,28 +307,57 @@ def test_stream_emits_partial_and_final_events(tmp_path: Path) -> None:
         assert engine.sessions[0].closed
 
 
+def test_stream_preserves_initial_audio_when_silence_trimming_is_disabled(tmp_path: Path) -> None:
+    engine = FakeEngine()
+    silence = (0).to_bytes(2, "little", signed=True) * 4000
+    speech = (1000).to_bytes(2, "little", signed=True) * 4000
+    with (
+        TestClient(create_app(settings(tmp_path), engine)) as client,
+        client.websocket_connect(
+            "/v1/audio/transcriptions/stream?trim_leading_silence=0"
+        ) as socket,
+    ):
+        started = socket.receive_json()
+        assert started["trim_leading_silence"] is False
+        socket.send_bytes(silence)
+        assert socket.receive_json()["type"] == "transcript.partial"
+        socket.send_bytes(speech)
+        assert socket.receive_json()["type"] == "transcript.partial"
+        socket.send_text('{"type":"commit"}')
+        assert socket.receive_json()["type"] == "transcript.final"
+
+    assert bytes(engine.sessions[0].pcm) == silence + speech
+
+
 def test_stream_rejects_invalid_recognition_settings(tmp_path: Path) -> None:
     engine = FakeEngine()
     with TestClient(create_app(settings(tmp_path), engine)) as client:
-        with client.websocket_connect("/v1/stream?output_script=translated") as socket:
+        with client.websocket_connect("/v1/audio/transcriptions/stream?output_script=translated") as socket:
             error = socket.receive_json()
             assert error["type"] == "error"
             assert error["code"] == "invalid_output_script"
-        with client.websocket_connect("/v1/stream?trim_leading_silence=maybe") as socket:
+        with client.websocket_connect(
+            "/v1/audio/transcriptions/stream?trim_leading_silence=maybe"
+        ) as socket:
             error = socket.receive_json()
             assert error["code"] == "invalid_trim_leading_silence"
     assert engine.sessions == []
+
+
+def test_retired_stream_alias_is_not_registered(tmp_path: Path) -> None:
+    app = create_app(settings(tmp_path), FakeEngine())
+    assert all(getattr(route, "path", None) != "/v1/stream" for route in app.routes)
 
 
 def test_stream_rejects_a_second_active_session(tmp_path: Path) -> None:
     engine = FakeEngine()
     with (
         TestClient(create_app(settings(tmp_path, max_active_streams=1), engine)) as client,
-        client.websocket_connect("/v1/stream") as first,
+        client.websocket_connect("/v1/audio/transcriptions/stream") as first,
     ):
         assert first.receive_json()["type"] == "session.started"
         assert client.get("/api/status").json()["stream"]["active"] == 1
-        with client.websocket_connect("/v1/stream") as second:
+        with client.websocket_connect("/v1/audio/transcriptions/stream") as second:
             busy = second.receive_json()
             assert busy["type"] == "error"
             assert busy["code"] == "server_busy"
@@ -325,7 +369,7 @@ def test_silence_finalizes_a_segment_without_closing_the_stream(tmp_path: Path) 
     engine = FakeEngine()
     with (
         TestClient(create_app(settings(tmp_path, silence_commit_ms=3000), engine)) as client,
-        client.websocket_connect("/v1/stream") as socket,
+        client.websocket_connect("/v1/audio/transcriptions/stream") as socket,
     ):
         assert socket.receive_json()["type"] == "session.started"
         socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 8000)

@@ -17,10 +17,19 @@ def main() -> int:
     base = urlparse(sys.argv[1])
     pcm_path = Path(sys.argv[2])
     query = "sample_rate=16000"
-    api_key = os.environ.get("STT_API_KEY", "")
+    api_key = os.environ.get("XGC2_STT_API_KEY", "")
     if api_key:
         query += f"&access_token={quote(api_key, safe='')}"
-    uri = urlunparse(("wss" if base.scheme == "https" else "ws", base.netloc, "/v1/stream", "", query, ""))
+    uri = urlunparse(
+        (
+            "wss" if base.scheme == "https" else "ws",
+            base.netloc,
+            "/v1/audio/transcriptions/stream",
+            "",
+            query,
+            "",
+        )
+    )
 
     partials: list[tuple[float, str]] = []
     finals: list[dict[str, object]] = []

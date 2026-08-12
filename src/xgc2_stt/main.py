@@ -67,8 +67,7 @@ def create_app(
     runtime_store = RuntimeSettingsStore(base_config.runtime_settings_path)
     config = base_config.model_copy(update=runtime_store.load())
     speech_engine = engine or VllmEngine(config)
-    legacy_secret = config.api_key.get_secret_value() if config.api_key is not None else None
-    key_store = api_keys or ApiKeyStore(config.api_key_store_path, legacy_secret)
+    key_store = api_keys or ApiKeyStore(config.api_key_store_path)
     gpu = gpu_monitor or GpuMonitor(
         enabled=config.gpu_metrics_enabled,
         interval_seconds=config.gpu_metrics_interval_seconds,
@@ -332,7 +331,6 @@ def create_app(
             await request_gate.release()
 
     app.websocket("/v1/audio/transcriptions/stream")(stream)
-    app.websocket("/v1/stream")(stream)
 
     web_dist = Path(config.web_dist)
     assets = web_dist / "assets"

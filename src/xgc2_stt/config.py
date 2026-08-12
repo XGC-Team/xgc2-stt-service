@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     gpu_metrics_enabled: bool = True
     gpu_metrics_interval_seconds: float = Field(default=2.0, ge=0.5, le=60.0)
 
-    api_key: SecretStr | None = None
     cors_origins: str = "*"
     max_upload_bytes: int = Field(default=52_428_800, ge=1_048_576)
     web_dist: str = "/opt/xgc2-stt/web"
@@ -51,13 +50,6 @@ class Settings(BaseSettings):
     def validate_engine_variant(cls, value: str) -> str:
         if value not in {"voxtral", "qwen"}:
             raise ValueError("engine_variant must be voxtral or qwen")
-        return value
-
-    @field_validator("api_key", mode="before")
-    @classmethod
-    def empty_api_key_is_disabled(cls, value: object) -> object:
-        if isinstance(value, str) and not value.strip():
-            return None
         return value
 
     @property
