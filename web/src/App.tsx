@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   AppShell,
   AudioCaptureControl,
   Button,
+  CodeBlock,
+  DescriptionItem,
+  DescriptionList,
   FormField,
   FormGroup,
   Input,
   Modal,
   Panel,
   ProductBrand,
+  ProgressBar,
   SegmentedControl,
-  StatusBadge,
+  SortableDataTable,
+  StatusText,
   Topbar,
   type AudioCaptureState,
+  type DataTableColumn,
   type StatusTone,
 } from '@xgc2/ui-react'
 import {
@@ -176,13 +182,6 @@ export default function App() {
       : captureState === 'finalizing'
         ? '生成结果'
         : '开始录音'
-
-  const waveformStyle = useMemo(() => Object.fromEntries(
-    waveformLevels.slice(0, 24).map((level, index) => [
-      `--stt-wave-${index + 1}`,
-      String(Math.max(0.12, Math.min(1, level))),
-    ]),
-  ) as CSSProperties, [waveformLevels])
 
   const handleStreamEvent = useCallback((event: StreamEvent) => {
     if (!acceptStreamEventsRef.current) return
@@ -415,13 +414,30 @@ export default function App() {
     },
   ] : []
 
+  const apiKeyColumns: DataTableColumn<ApiKeyRecord>[] = [
+    { id: 'name', header: '名称', sortable: true, sortValue: (record) => record.name, cell: (record) => <strong>{record.name}</strong> },
+    { id: 'key', header: 'Key', sortable: true, sortValue: (record) => record.prefix, cell: (record) => <code>{record.prefix}…</code> },
+    { id: 'requests', header: '请求', sortable: true, sortValue: (record) => record.request_count, cell: (record) => record.request_count },
+    { id: 'audio', header: '音频', sortable: true, sortValue: (record) => record.audio_seconds, cell: (record) => `${(record.audio_seconds / 60).toFixed(1)} min` },
+    { id: 'active', header: '活跃', sortable: true, sortValue: (record) => record.active_sessions, cell: (record) => record.active_sessions },
+    {
+      id: 'actions',
+      header: '操作',
+      className: 'api-key-actions',
+      cell: (record) => <>
+        <Button appearance="ghost" uiSize="compact" onClick={() => void rotateKey(record)}>轮换</Button>
+        <Button appearance="ghost" uiSize="compact" disabled={!record.enabled} onClick={() => void revokeKey(record)}>停用</Button>
+      </>,
+    },
+  ]
+
   return (
     <AppShell
       contentPadding="none"
       contentClassName="stt-content"
       topbar={(
         <Topbar
-          leading={<ProductBrand product="STT" />}
+          brand={<ProductBrand product="STT" />}
           actions={<Button appearance="ghost" uiSize="compact" onClick={openSettings}>设置</Button>}
         />
       )}
@@ -432,17 +448,17 @@ export default function App() {
           padding="none"
           title="实时转写"
           actions={streamState
-            ? <StatusBadge status={captureState}>{streamState}</StatusBadge>
+            ? <StatusText status={captureState}>{streamState}</StatusText>
             : status?.engine.state !== 'ready' || statusError
-              ? <StatusBadge status={statusError ? 'offline' : status?.engine.state || 'connecting'} tone={engineTone}>{engineLabel}</StatusBadge>
+              ? <StatusText status={statusError ? 'offline' : status?.engine.state || 'connecting'} tone={engineTone}>{engineLabel}</StatusText>
               : null}
         >
           <AudioCaptureControl
-            style={waveformStyle}
             state={captureState}
             actionLabel={recordLabel}
             cancelLabel="取消"
             error={captureError}
+            waveformLevels={waveformLevels}
             waveformLabel="麦克风输入活动"
             onAction={() => void toggleCapture()}
             onCancel={() => void cancelCapture()}
@@ -473,16 +489,16 @@ export default function App() {
 
         <Panel className="runtime-panel" padding="none" title="运行状态">
           {status ? (
-            <dl className="runtime-grid">
-              <div><dt>模型</dt><dd>{status.engine.model}</dd></div>
-              <div><dt>引擎</dt><dd>{status.engine.variant} · {status.engine.backend}</dd></div>
-              <div><dt>推理</dt><dd>{status.engine.device} · {status.engine.compute_type}</dd></div>
-              <div><dt>并发</dt><dd>{status.stream.active} / {status.stream.capacity}</dd></div>
-              <div><dt>延迟</dt><dd>{status.stream.transcription_delay_ms} ms</dd></div>
-              <div><dt>GPU</dt><dd>{status.engine.cuda_devices ?? '未知'} 个设备</dd></div>
-              <div><dt>认证</dt><dd>{status.authentication}</dd></div>
-              <div><dt>服务地址</dt><dd>{connection.endpoint}</dd></div>
-            </dl>
+            <DescriptionList className="runtime-grid">
+              <DescriptionItem label="模型" value={status.engine.model} />
+              <DescriptionItem label="引擎" value={`${status.engine.variant} · ${status.engine.backend}`} />
+              <DescriptionItem label="推理" value={`${status.engine.device} · ${status.engine.compute_type}`} />
+              <DescriptionItem label="并发" value={`${status.stream.active} / ${status.stream.capacity}`} />
+              <DescriptionItem label="延迟" value={`${status.stream.transcription_delay_ms} ms`} />
+              <DescriptionItem label="GPU" value={`${status.engine.cuda_devices ?? '未知'} 个设备`} />
+              <DescriptionItem label="认证" value={status.authentication} />
+              <DescriptionItem label="服务地址" value={connection.endpoint} />
+            </DescriptionList>
           ) : <p className="status-error">{statusError || '读取中'}</p>}
         </Panel>
 
@@ -492,7 +508,7 @@ export default function App() {
               {gpuMetrics.map((metric) => (
                 <div className="gpu-metric" key={metric.label}>
                   <div><span>{metric.label}</span><strong>{metric.value}</strong></div>
-                  <div className="gpu-bar"><i style={{ width: `${Math.min(100, Math.max(0, metric.percent))}%` }} /></div>
+                  <ProgressBar className="gpu-bar" label={metric.label} max={100} percent={metric.percent} value={metric.percent} />
                   <svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true">
                     <polyline points={metric.points} />
                   </svg>
@@ -508,24 +524,17 @@ export default function App() {
           title="API"
           actions={<Button appearance="ghost" uiSize="compact" onClick={openKeyDialog}>新建 Key</Button>}
         >
-          <div className="api-key-table" role="table" aria-label="API Key 使用情况">
-            <div className="api-key-row api-key-head" role="row">
-              <span>名称</span><span>Key</span><span>请求</span><span>音频</span><span>活跃</span><span />
-            </div>
-            {apiKeys.map((record) => (
-              <div className="api-key-row" role="row" key={record.id} data-disabled={!record.enabled}>
-                <strong>{record.name}</strong>
-                <code>{record.prefix}…</code>
-                <span>{record.request_count}</span>
-                <span>{(record.audio_seconds / 60).toFixed(1)} min</span>
-                <span>{record.active_sessions}</span>
-                <span className="api-key-actions">
-                  <Button appearance="ghost" uiSize="compact" onClick={() => void rotateKey(record)}>轮换</Button>
-                  <Button appearance="ghost" uiSize="compact" disabled={!record.enabled} onClick={() => void revokeKey(record)}>停用</Button>
-                </span>
-              </div>
-            ))}
-          </div>
+          <SortableDataTable
+            aria-label="API Key 使用情况"
+            className="api-key-table"
+            columns={apiKeyColumns}
+            data-sticky-header="true"
+            emptyMessage="暂无 API Key"
+            getRowProps={(record) => ({ className: record.enabled ? undefined : 'api-key-disabled' })}
+            rowKey={(record) => record.id}
+            rows={apiKeys}
+            tableProps={{ className: 'api-key-data-table' }}
+          />
           {apiKeyError ? <p className="status-error">{apiKeyError}</p> : null}
         </Panel>
       </div>
@@ -701,7 +710,6 @@ export default function App() {
         onClose={() => setKeyDialogOpen(false)}
         actions={issuedSecret ? (
           <>
-            <Button onClick={() => void navigator.clipboard.writeText(issuedSecret)}>复制</Button>
             <Button onClick={useIssuedKey}>用于当前客户端</Button>
             <Button tone="primary" onClick={() => setKeyDialogOpen(false)}>完成</Button>
           </>
@@ -713,7 +721,7 @@ export default function App() {
         )}
       >
         {issuedSecret ? (
-          <code className="issued-key">{issuedSecret}</code>
+          <CodeBlock className="issued-key" content={issuedSecret} copyLabel="复制" copySuccessLabel="已复制" language="text" />
         ) : (
           <form id="api-key-form" className="settings-form" onSubmit={(event) => void issueKey(event)}>
             <FormField label="名称" required>

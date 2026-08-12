@@ -22,38 +22,6 @@ body,
   min-height: 174px;
 }
 
-/* v0.7.2 exposes the capture root but not per-bar values. Feed the real PCM
-   levels through inherited custom properties until the next shared-UI release. */
-.capture-panel .xgc-audio-waveform > span {
-  animation: none !important;
-  transition: transform 60ms linear;
-}
-
-.capture-panel .xgc-audio-waveform > span:nth-child(1) { transform: scaleY(var(--stt-wave-1, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(2) { transform: scaleY(var(--stt-wave-2, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(3) { transform: scaleY(var(--stt-wave-3, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(4) { transform: scaleY(var(--stt-wave-4, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(5) { transform: scaleY(var(--stt-wave-5, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(6) { transform: scaleY(var(--stt-wave-6, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(7) { transform: scaleY(var(--stt-wave-7, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(8) { transform: scaleY(var(--stt-wave-8, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(9) { transform: scaleY(var(--stt-wave-9, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(10) { transform: scaleY(var(--stt-wave-10, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(11) { transform: scaleY(var(--stt-wave-11, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(12) { transform: scaleY(var(--stt-wave-12, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(13) { transform: scaleY(var(--stt-wave-13, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(14) { transform: scaleY(var(--stt-wave-14, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(15) { transform: scaleY(var(--stt-wave-15, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(16) { transform: scaleY(var(--stt-wave-16, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(17) { transform: scaleY(var(--stt-wave-17, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(18) { transform: scaleY(var(--stt-wave-18, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(19) { transform: scaleY(var(--stt-wave-19, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(20) { transform: scaleY(var(--stt-wave-20, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(21) { transform: scaleY(var(--stt-wave-21, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(22) { transform: scaleY(var(--stt-wave-22, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(23) { transform: scaleY(var(--stt-wave-23, .12)); }
-.capture-panel .xgc-audio-waveform > span:nth-child(24) { transform: scaleY(var(--stt-wave-24, .12)); }
-
 .transcript-panel {
   min-height: 310px;
 }
@@ -75,12 +43,7 @@ body,
 }
 
 .partial-text {
-  padding-inline: var(--space-2);
   color: var(--color-text-faint);
-  background: color-mix(in srgb, var(--color-bg-active) 72%, transparent);
-  border-radius: var(--radius-sm);
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
 }
 
 .runtime-panel,
@@ -125,18 +88,8 @@ body,
   white-space: nowrap;
 }
 
-.gpu-bar {
-  height: var(--space-3);
+.gpu-bar.xgc-progress {
   margin-top: var(--space-8);
-  overflow: hidden;
-  background: var(--color-bg-subtle);
-  border-radius: var(--radius-pill);
-}
-
-.gpu-bar i {
-  display: block;
-  height: 100%;
-  background: var(--color-border-primary);
 }
 
 .gpu-metric svg {
@@ -153,58 +106,32 @@ body,
   vector-effect: non-scaling-stroke;
 }
 
-.api-key-table {
+.api-key-table.xgc-data-table {
   width: 100%;
-  overflow-x: auto;
 }
 
-.api-key-row {
+.api-key-data-table {
   min-width: 720px;
-  display: grid;
-  grid-template-columns: minmax(130px, 1.2fr) minmax(130px, 1fr) 70px 90px 55px minmax(150px, auto);
-  align-items: center;
-  gap: var(--space-10);
-  min-height: 38px;
-  padding: 0 var(--space-12);
-  border-bottom: var(--stroke-thin) solid var(--color-border);
 }
 
-.api-key-row:last-child {
-  border-bottom: 0;
-}
-
-.api-key-row[data-disabled='true'] {
+.api-key-disabled {
   opacity: var(--opacity-disabled);
 }
 
-.api-key-head {
-  min-height: 30px;
-  color: var(--color-text-faint);
-  background: var(--color-bg-subtle);
-  font-size: var(--font-sm);
-  font-weight: var(--weight-semibold);
-}
-
-.api-key-row code {
+.api-key-data-table code {
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }
 
-.api-key-actions {
+.api-key-data-table .api-key-actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-4);
 }
 
-.issued-key {
-  display: block;
-  padding: var(--space-12);
+.issued-key.xgc-code-block pre {
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
-  color: var(--color-text-heading);
-  background: var(--color-bg-subtle);
-  border: var(--stroke-thin) solid var(--color-border);
-  border-radius: var(--radius-surface);
-  font-family: var(--font-mono);
 }
 
 .runtime-grid {
@@ -271,28 +198,6 @@ body,
   margin: 0;
   color: var(--color-text-heading);
   font-size: var(--font-base);
-}
-
-/* Remove after the batched shared-UI release exposes StatusText to consumers. */
-.stt-content .xgc-status-badge {
-  padding: 0;
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 0;
-  border-radius: 0;
-  font-weight: var(--weight-medium);
-}
-
-.stt-content .xgc-status-badge[data-tone='success'] {
-  color: var(--color-success);
-}
-
-.stt-content .xgc-status-badge[data-tone='warning'] {
-  color: var(--color-warning);
-}
-
-.stt-content .xgc-status-badge[data-tone='danger'] {
-  color: var(--color-danger);
 }
 
 @media (max-width: 760px) {
