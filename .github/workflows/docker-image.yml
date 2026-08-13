@@ -179,6 +179,10 @@ jobs:
           target="${target//\/\//\/}"
           tags=(base base-${VERSION} qwen qwen-${VERSION} voxtral voxtral-${VERSION} latest)
           for tag in "${tags[@]}"; do
-            skopeo copy --all --authfile "${HOME}/.docker/config.json" \
+            # GHCR indexes also contain SBOM/provenance attestations. Alibaba
+            # Personal Edition rejects their OCI empty config media type, so
+            # mirror only the runnable platform image and keep attestations on GHCR.
+            skopeo copy --override-os linux --override-arch amd64 \
+              --authfile "${HOME}/.docker/config.json" \
               "docker://${IMAGE}:${tag}" "docker://${target}:${tag}"
           done
