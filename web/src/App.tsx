@@ -454,6 +454,7 @@ export default function App() {
               : null}
         >
           <AudioCaptureControl
+            className="stt-audio-capture"
             state={captureState}
             actionLabel={recordLabel}
             cancelLabel="取消"
