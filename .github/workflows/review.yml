@@ -29,13 +29,13 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install desktop test runtime
-        run: sudo apt-get install -y --no-install-recommends libportaudio2
+        run: sudo apt-get install -y --no-install-recommends libportaudio2 xauth xvfb
 
       - name: Source, WebUI, Compose, and shell checks
         run: |
           uv sync --frozen --extra dev --extra desktop
           uv run ruff check src tests scripts/verify-stream.py
-          uv run pytest
+          xvfb-run -a uv run pytest
           npm --prefix web ci
           npm --prefix web run test
           npm --prefix web run typecheck
