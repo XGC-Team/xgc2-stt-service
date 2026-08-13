@@ -229,46 +229,33 @@ class TextInjector:
     def _paste(self, text: str) -> None:
         xclip = shutil.which("xclip")
         xdotool = shutil.which("xdotool")
+        if xclip is None or xdotool is None:
+            raise RuntimeError("文本注入需要安装 xclip 和 xdotool")
         chord = "ctrl+shift+v" if self.shortcut == "terminal" else "ctrl+v"
-        if xclip is not None and xdotool is not None:
-            try:
-                copied = subprocess.run(
-                    [xclip, "-selection", "clipboard", "-in"],
-                    input=text.encode("utf-8"),
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=2,
-                    check=False,
-                )
-                if copied.returncode != 0:
-                    raise OSError("xclip failed to acquire the clipboard")
-                result = subprocess.run(
-                    [xdotool, "key", "--clearmodifiers", chord],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=2,
-                    check=False,
-                )
-                if result.returncode == 0:
-                    self.last_clipboard = text
-                    return
-            except (OSError, subprocess.TimeoutExpired):
-                pass
-
-        clipboard = self.application.clipboard()
-        clipboard.setText(text)
-        self.application.processEvents()
+        try:
+            copied = subprocess.run(
+                [xclip, "-selection", "clipboard", "-in"],
+                input=text.encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                check=False,
+            )
+            if copied.returncode != 0:
+                raise RuntimeError("xclip 无法取得剪贴板所有权")
+            pasted = subprocess.run(
+                [xdotool, "key", "--clearmodifiers", chord],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(f"文本注入失败: {exc}") from exc
+        if pasted.returncode != 0:
+            raise RuntimeError("xdotool 无法发送粘贴快捷键")
         self.last_clipboard = text
-        if self.shortcut == "terminal":
-            # The installer requires xclip/xdotool. This fallback is retained
-            # for manually packaged clients and lets Qt service the clipboard
-            # request once this slot returns to the event loop.
-            with self.keyboard.pressed(Key.ctrl), self.keyboard.pressed(Key.shift):
-                self.keyboard.tap("v")
-            return
-        with self.keyboard.pressed(Key.ctrl):
-            self.keyboard.tap("v")
 
     def end(self) -> None:
         clipboard = self.application.clipboard()
@@ -774,7 +761,13 @@ class ClientController(QObject):
     @Slot(str)
     def _commit_segment(self, reason: str) -> None:
         auto_enter = should_auto_enter(self.settings.auto_enter, reason)
-        if not self.injector.commit_segment(auto_enter=auto_enter):
+        try:
+            focus_matches = self.injector.commit_segment(auto_enter=auto_enter)
+        except RuntimeError as exc:
+            self.overlay.set_state("文本注入失败", "#df8589")
+            self._show_error(str(exc))
+            return
+        if not focus_matches:
             self.overlay.set_state("焦点已变", "#d7ae66")
         self.overlay.set_preview("", "", "")
 

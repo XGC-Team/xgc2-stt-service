@@ -10,10 +10,6 @@ from tempfile import NamedTemporaryFile
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 DEFAULT_HOTKEY = "<f8>"
-LEGACY_DEFAULT_HOTKEYS = (
-    "<ctrl>+<shift>+r",
-    "<ctrl>+<shift>+s",
-)
 
 
 @dataclass(frozen=True)
@@ -45,8 +41,6 @@ def load_desktop_settings(path: Path | None = None) -> DesktopSettings:
         return DesktopSettings()
     allowed = {field.name for field in fields(DesktopSettings)}
     values = {key: value for key, value in raw.items() if key in allowed}
-    if values.get("hotkey") in LEGACY_DEFAULT_HOTKEYS:
-        values["hotkey"] = DEFAULT_HOTKEY
     try:
         return DesktopSettings(**values)
     except TypeError:

@@ -60,12 +60,12 @@ def test_pre_schema_desktop_settings_are_rejected_without_migration(tmp_path: Pa
     assert load_desktop_settings(target) == DesktopSettings()
 
 
-@pytest.mark.parametrize("legacy", ["<ctrl>+<shift>+r", "<ctrl>+<shift>+s"])
-def test_previous_schema_default_hotkey_is_migrated(tmp_path: Path, legacy: str) -> None:
+@pytest.mark.parametrize("hotkey", ["<ctrl>+<shift>+r", "<ctrl>+<shift>+s"])
+def test_explicit_schema_hotkey_is_not_rewritten(tmp_path: Path, hotkey: str) -> None:
     target = tmp_path / "client.json"
     target.write_text(
-        json.dumps({"schema_version": 1, "hotkey": legacy}),
+        json.dumps({"schema_version": 1, "hotkey": hotkey}),
         encoding="utf-8",
     )
 
-    assert load_desktop_settings(target).hotkey == "<f8>"
+    assert load_desktop_settings(target).hotkey == hotkey
