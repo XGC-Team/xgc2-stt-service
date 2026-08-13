@@ -4,6 +4,8 @@ import json
 import stat
 from pathlib import Path
 
+import pytest
+
 from xgc2_stt.desktop_support import (
     DesktopSettings,
     load_desktop_settings,
@@ -40,7 +42,7 @@ def test_auto_enter_is_off_by_default() -> None:
     settings = DesktopSettings()
 
     assert settings.auto_enter is False
-    assert settings.hotkey == "<ctrl>+<shift>+s"
+    assert settings.hotkey == "<f8>"
 
 
 def test_auto_enter_only_submits_silence_final() -> None:
@@ -56,11 +58,12 @@ def test_pre_schema_desktop_settings_are_rejected_without_migration(tmp_path: Pa
     assert load_desktop_settings(target) == DesktopSettings()
 
 
-def test_previous_schema_default_hotkey_is_migrated(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", ["<ctrl>+<shift>+r", "<ctrl>+<shift>+s"])
+def test_previous_schema_default_hotkey_is_migrated(tmp_path: Path, legacy: str) -> None:
     target = tmp_path / "client.json"
     target.write_text(
-        '{"schema_version":1,"hotkey":"<ctrl>+<shift>+r"}',
+        json.dumps({"schema_version": 1, "hotkey": legacy}),
         encoding="utf-8",
     )
 
-    assert load_desktop_settings(target).hotkey == "<ctrl>+<shift>+s"
+    assert load_desktop_settings(target).hotkey == "<f8>"

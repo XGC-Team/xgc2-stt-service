@@ -176,7 +176,9 @@ No supported setting requires entering the container or rebuilding the image.
 The repository includes a native PySide6 client for Linux/X11. It is one local
 process, not another browser frontend/backend. A small always-on-top status
 window and tray icon expose settings; the default global shortcut is
-`Ctrl+Shift+S`. The first press connects and starts microphone capture, and
+`F8`. It deliberately avoids `Ctrl+Shift` because common Linux Chinese input
+methods use that modifier family for input-method and simplified/traditional
+switching. The first press connects and starts microphone capture, and
 the next press commits and stops. The default API URL is
 `http://127.0.0.1:34897`; users enter their own IP/port or HTTPS URL and API key.
 
