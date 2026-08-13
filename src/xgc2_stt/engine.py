@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import signal
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
@@ -330,6 +331,7 @@ class VllmEngine:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._process: asyncio.subprocess.Process | None = None
+        self._process_group_id: int | None = None
         self._monitor_task: asyncio.Task[None] | None = None
         self._state = "idle"
         self._error: str | None = None
@@ -362,7 +364,13 @@ class VllmEngine:
             self._process = await asyncio.create_subprocess_exec(
                 *build_engine_command(self.settings),
                 env=environment,
+                start_new_session=True,
             )
+            # start_new_session makes the engine launcher the leader of a new
+            # process group. Keep the id independently: qwen's launcher can
+            # exit before its VLLM::EngineCore child, at which point getpgid()
+            # can no longer recover the group from the launcher pid.
+            self._process_group_id = self._process.pid
         except Exception as exc:
             self._state = "error"
             self._error = f"{type(exc).__name__}: {exc}"
@@ -411,15 +419,15 @@ class VllmEngine:
             with suppress(asyncio.CancelledError):
                 await task
         process = self._process
+        process_group_id = self._process_group_id
         self._process = None
-        if process is None or process.returncode is not None:
+        self._process_group_id = None
+        if process is None:
             return
-        process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=30)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
+        if process_group_id is not None:
+            await _terminate_process_group(process, process_group_id)
+        else:
+            await _terminate_process(process)
 
     async def reconfigure(self, settings: Settings) -> None:
         await self.close()
@@ -511,6 +519,68 @@ async def _cuda_device_count() -> int | None:
         return len([line for line in output.decode().splitlines() if line.strip()])
     except (OSError, TimeoutError):
         return None
+
+
+async def _terminate_process_group(
+    process: asyncio.subprocess.Process,
+    process_group_id: int,
+    *,
+    timeout: float = 30,
+) -> None:
+    """Stop an engine launcher and every worker it spawned in its session."""
+    try:
+        os.killpg(process_group_id, signal.SIGTERM)
+    except ProcessLookupError:
+        await process.wait()
+        return
+
+    deadline = asyncio.get_running_loop().time() + timeout
+    await _wait_for_process_until(process, deadline)
+    if await _wait_for_process_group_until(process_group_id, deadline):
+        return
+
+    with suppress(ProcessLookupError):
+        os.killpg(process_group_id, signal.SIGKILL)
+    await _wait_for_process_until(process, asyncio.get_running_loop().time() + 5)
+    await _wait_for_process_group_until(process_group_id, asyncio.get_running_loop().time() + 5)
+
+
+async def _terminate_process(process: asyncio.subprocess.Process, *, timeout: float = 30) -> None:
+    """Fallback for a process that predates process-group management."""
+    if process.returncode is not None:
+        await process.wait()
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=timeout)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+
+
+async def _wait_for_process_until(process: asyncio.subprocess.Process, deadline: float) -> bool:
+    if process.returncode is not None:
+        await process.wait()
+        return True
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        return False
+    try:
+        await asyncio.wait_for(process.wait(), timeout=remaining)
+    except TimeoutError:
+        return False
+    return True
+
+
+async def _wait_for_process_group_until(process_group_id: int, deadline: float) -> bool:
+    while True:
+        try:
+            os.killpg(process_group_id, 0)
+        except ProcessLookupError:
+            return True
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
+        await asyncio.sleep(0.1)
 
 
 def _decode_audio_pcm16(path: str) -> bytes:

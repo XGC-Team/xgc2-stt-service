@@ -3,7 +3,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
+import signal
+import sys
 import wave
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +15,7 @@ import xgc2_stt.engine as engine_module
 from xgc2_stt.config import Settings
 from xgc2_stt.engine import (
     QwenSdkRealtimeSession,
+    VllmEngine,
     VllmRealtimeSession,
     _decode_audio_pcm16,
     build_qwen_command,
@@ -57,6 +62,63 @@ def test_qwen_command_selects_official_revision_capable_streaming_server() -> No
     assert command[command.index("--unfixed-chunk-num") + 1] == "4"
     assert command[command.index("--unfixed-token-num") + 1] == "5"
     assert command[command.index("--chunk-size-sec") + 1] == "1.0"
+
+
+def test_managed_engine_close_terminates_orphaned_worker_process_group(tmp_path: Path, monkeypatch: Any) -> None:
+    if os.name != "posix":
+        return
+
+    worker_pid_path = tmp_path / "worker.pid"
+    launcher = (
+        "import pathlib, subprocess, sys; "
+        "worker = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)']); "
+        "pathlib.Path(sys.argv[1]).write_text(str(worker.pid))"
+    )
+
+    async def no_cuda_probe() -> None:
+        return None
+
+    monkeypatch.setattr(engine_module, "_cuda_device_count", no_cuda_probe)
+    monkeypatch.setattr(
+        engine_module,
+        "build_engine_command",
+        lambda settings: [sys.executable, "-c", launcher, str(worker_pid_path)],
+    )
+
+    async def exercise() -> None:
+        engine = VllmEngine(Settings())
+        worker_pid: int | None = None
+        await engine.start()
+        process = engine._process
+        assert process is not None
+        try:
+            assert os.getpgid(process.pid) == process.pid
+            await asyncio.wait_for(process.wait(), timeout=5)
+            for _ in range(100):
+                if worker_pid_path.exists():
+                    break
+                await asyncio.sleep(0.02)
+            worker_pid = int(worker_pid_path.read_text())
+            assert os.getpgid(worker_pid) == process.pid
+
+            # The launcher is gone, but close must still terminate its live
+            # EngineCore-like worker by using the remembered process group.
+            assert process.returncode == 0
+            os.kill(worker_pid, 0)
+            await engine.close()
+            try:
+                os.kill(worker_pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise AssertionError("orphaned worker survived engine.close()")
+        finally:
+            await engine.close()
+            if worker_pid is not None:
+                with suppress(ProcessLookupError):
+                    os.kill(worker_pid, signal.SIGKILL)
+
+    asyncio.run(exercise())
 
 
 def test_audio_upload_is_decoded_to_mono_pcm16(tmp_path: Path) -> None:
