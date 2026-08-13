@@ -13,8 +13,8 @@ from typing import Any
 
 from pynput.keyboard import Controller as KeyboardController
 from pynput.keyboard import GlobalHotKeys, Key
-from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QCursor, QTextCursor
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QAction, QCloseEvent, QCursor, QMouseEvent, QTextCursor
 from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (
     QApplication,
@@ -544,15 +544,22 @@ class Overlay(QWidget):
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFixedSize(560, 112)
+        self._drag_offset: QPoint | None = None
         self.dot = QLabel("●")
         self.label = QLabel("待机")
+        self.dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.preview = QTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setUndoRedoEnabled(False)
         self.preview.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.preview.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
         self.preview.document().setDocumentMargin(0)
-        header = QHBoxLayout()
+        self.drag_handle = QWidget()
+        self.drag_handle.setObjectName("dragHandle")
+        self.drag_handle.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.drag_handle.installEventFilter(self)
+        header = QHBoxLayout(self.drag_handle)
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
         header.addWidget(self.dot)
@@ -560,7 +567,7 @@ class Overlay(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 7, 8, 9)
         layout.setSpacing(5)
-        layout.addLayout(header)
+        layout.addWidget(self.drag_handle)
         layout.addWidget(self.preview, 1)
         self.setStyleSheet(
             "QWidget { background:#181e27; color:#cdd6e2; border:1px solid #303a46; border-radius:6px; }"
@@ -613,6 +620,32 @@ class Overlay(QWidget):
     def set_state(self, label: str, color: str) -> None:
         self.label.setText(label)
         self.dot.setStyleSheet(f"color:{color}; border:0;")
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is not self.drag_handle or not isinstance(event, QMouseEvent):
+            return super().eventFilter(watched, event)
+        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self.drag_handle.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return True
+        if event.type() == QEvent.Type.MouseMove and self._drag_offset is not None:
+            global_position = event.globalPosition().toPoint()
+            screen = QApplication.screenAt(global_position) or QApplication.primaryScreen()
+            target = global_position - self._drag_offset
+            if screen is not None:
+                area = screen.availableGeometry()
+                target.setX(max(area.left() + 8, min(target.x(), area.right() - self.width() - 8)))
+                target.setY(max(area.top() + 8, min(target.y(), area.bottom() - self.height() - 8)))
+            self.move(target)
+            event.accept()
+            return True
+        if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_offset = None
+            self.drag_handle.setCursor(Qt.CursorShape.OpenHandCursor)
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         event.ignore()

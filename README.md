@@ -198,9 +198,11 @@ The client streams PCM to the service and, only while recognition is active,
 shows each replacement hypothesis in a non-activating transient preview at a
 fixed bottom-center position on the monitor where capture starts. It does not
 attempt cross-application caret or widget tracking, so Qt, browser, terminal,
-and multi-monitor behavior is deterministic. The preview hides as soon as the
-session finishes or fails. Stable text is bright and the still-revisable tail
-is highlighted. Only a server-finalized segment is pasted
+and multi-monitor behavior is deterministic. Its status header can be dragged
+to avoid important content for the current recording; the next recording
+starts at bottom center again. The preview hides as soon as the session
+finishes or fails. Stable text is bright and the still-revisable tail is
+highlighted. Only a server-finalized segment is pasted
 once into the terminal/input field that held focus when recording began, so
 model revisions never churn the target and Chinese input methods cannot turn a
 paste chord into transcript text. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V`
