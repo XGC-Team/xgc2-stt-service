@@ -57,11 +57,28 @@ download_locked() {
     return
   fi
   local partial="${target}.partial.$$"
+  local downloaded=false
+  local attempt
   rm -f -- "${partial}"
-  curl --fail --location --http1.1 \
-    --connect-timeout 30 --max-time 1200 \
-    --retry 8 --retry-delay 2 --retry-connrefused \
-    --output "${partial}" "${url}"
+  # Focal's curl doesn't classify an HTTP/2 proxy "empty reply" (exit 52)
+  # as retryable. Keep curl's native transient retries, then retry the whole
+  # transfer so one broken edge connection cannot fail an immutable build.
+  for attempt in 1 2 3 4; do
+    if curl --fail --location --http1.1 \
+      --connect-timeout 30 --max-time 1200 \
+      --retry 8 --retry-delay 2 --retry-connrefused \
+      --output "${partial}" "${url}"; then
+      downloaded=true
+      break
+    fi
+    echo "Download attempt ${attempt}/4 failed: ${url}" >&2
+    sleep "$((attempt * 2))"
+  done
+  if [[ "${downloaded}" != true ]]; then
+    rm -f -- "${partial}"
+    echo "Download failed after 4 attempts: ${url}" >&2
+    exit 1
+  fi
   printf '%s  %s\n' "${expected_sha256}" "${partial}" | sha256sum --check --status || {
     rm -f -- "${partial}"
     echo "Downloaded archive failed SHA-256 verification: ${url}" >&2
