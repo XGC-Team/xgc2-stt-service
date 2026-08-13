@@ -17,6 +17,7 @@ import {
   SortableDataTable,
   StatusText,
   Topbar,
+  useSkin,
   type AudioCaptureState,
   type DataTableColumn,
   type StatusTone,
@@ -39,8 +40,6 @@ import {
   updateRuntimeSettings,
 } from './api'
 import { MicrophoneStream, type StreamEvent } from './stream'
-
-type Skin = 'light' | 'dark'
 
 function initialConnection(): ConnectionSettings {
   const storedEndpoint = localStorage.getItem('xgc2-stt.endpoint')
@@ -90,7 +89,7 @@ export default function App() {
   const [keyDialogOpen, setKeyDialogOpen] = useState(false)
   const [keyName, setKeyName] = useState('')
   const [issuedSecret, setIssuedSecret] = useState('')
-  const [skin, setSkinState] = useState<Skin>(() => localStorage.getItem('xgc2-stt.skin') === 'dark' ? 'dark' : 'light')
+  const [skin, setSkin] = useSkin({ defaultSkin: 'light', storageKey: 'xgc2-stt.skin' })
   const streamRef = useRef<MicrophoneStream | null>(null)
   const acceptStreamEventsRef = useRef(false)
   const browserKeyProvisioningRef = useRef(false)
@@ -99,12 +98,6 @@ export default function App() {
   const transitionCapture = useCallback((next: AudioCaptureState) => {
     captureStateRef.current = next
     setCaptureState(next)
-  }, [])
-
-  const applySkin = useCallback((next: Skin) => {
-    setSkinState(next)
-    document.documentElement.dataset.skin = next
-    localStorage.setItem('xgc2-stt.skin', next)
   }, [])
 
   const refreshStatus = useCallback(async () => {
@@ -134,11 +127,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    document.documentElement.dataset.skin = skin
     void refreshStatus()
     const pollTimer = window.setInterval(() => void refreshStatus(), 5000)
     return () => window.clearInterval(pollTimer)
-  }, [refreshStatus, skin])
+  }, [refreshStatus])
 
   useEffect(() => {
     if (status?.authentication !== 'api-key' || connection.apiKey || browserKeyProvisioningRef.current) return
@@ -696,7 +688,7 @@ export default function App() {
               ariaLabel="皮肤"
               value={skin}
               options={[{ label: '浅色', value: 'light' }, { label: '深色', value: 'dark' }]}
-              onValueChange={(value) => applySkin(value as Skin)}
+              onValueChange={(value) => setSkin(value === 'dark' ? 'dark' : 'light')}
             />
           </FormGroup>
           </section>
