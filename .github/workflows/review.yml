@@ -28,6 +28,9 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Install desktop test runtime
+        run: sudo apt-get install -y --no-install-recommends libportaudio2
+
       - name: Source, WebUI, Compose, and shell checks
         run: |
           uv sync --frozen --extra dev --extra desktop
