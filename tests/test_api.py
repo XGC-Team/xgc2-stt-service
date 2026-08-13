@@ -114,7 +114,7 @@ def test_health_status_and_model_contract(tmp_path: Path) -> None:
         assert status["stream"]["format"] == "pcm_s16le"
         assert status["stream"]["protocol"] == "openai-realtime"
         assert status["stream"]["finalization"] == "silence-or-manual"
-        assert status["stream"]["silence_commit_ms"] == 3000
+        assert status["stream"]["silence_commit_ms"] == 2000
         assert status["stream"]["active"] == 0
         assert status["stream"]["capacity"] == 1
         models = client.get("/v1/models").json()
@@ -268,7 +268,7 @@ def test_runtime_settings_distinguish_hot_changes_from_model_restart(tmp_path: P
     app = create_app(settings(tmp_path), engine)
     with TestClient(app) as client:
         current = client.get("/api/settings").json()
-        assert current["values"]["silence_commit_ms"] == 3000
+        assert current["values"]["silence_commit_ms"] == 2000
         hot = client.put("/api/settings", json={"silence_commit_ms": 2500, "max_active_streams": 2})
         assert hot.status_code == 200
         assert hot.json()["restart_required"] is False
@@ -288,13 +288,15 @@ def test_stream_emits_partial_and_final_events(tmp_path: Path) -> None:
     engine = FakeEngine()
     with TestClient(create_app(settings(tmp_path), engine)) as client:
         with client.websocket_connect(
-            "/v1/audio/transcriptions/stream?sample_rate=16000&output_script=simplified&trim_leading_silence=1"
+            "/v1/audio/transcriptions/stream?sample_rate=16000&output_script=simplified&"
+            "trim_leading_silence=1&silence_commit_ms=1500"
         ) as socket:
             started = socket.receive_json()
             assert started["type"] == "session.started"
             assert started["format"] == "pcm_s16le"
             assert started["output_script"] == "simplified"
             assert started["trim_leading_silence"] is True
+            assert started["silence_commit_ms"] == 1500
             socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 4000)
             partial = socket.receive_json()
             assert partial["type"] == "transcript.partial"
@@ -341,6 +343,11 @@ def test_stream_rejects_invalid_recognition_settings(tmp_path: Path) -> None:
         ) as socket:
             error = socket.receive_json()
             assert error["code"] == "invalid_trim_leading_silence"
+        with client.websocket_connect(
+            "/v1/audio/transcriptions/stream?silence_commit_ms=fast"
+        ) as socket:
+            error = socket.receive_json()
+            assert error["code"] == "invalid_silence_commit_ms"
     assert engine.sessions == []
 
 

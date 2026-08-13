@@ -24,6 +24,7 @@ class DesktopSettings:
     hotkey: str = DEFAULT_HOTKEY
     output_script: str = "simplified"
     trim_leading_silence: bool = True
+    silence_commit_ms: int = 2000
     paste_shortcut: str = "terminal"
     auto_enter: bool = False
     start_at_login: bool = False
@@ -76,6 +77,7 @@ def streaming_url(settings: DesktopSettings) -> str:
             "sample_rate": "16000",
             "output_script": settings.output_script,
             "trim_leading_silence": "1" if settings.trim_leading_silence else "0",
+            "silence_commit_ms": str(settings.silence_commit_ms),
         }
     )
     if settings.api_key:

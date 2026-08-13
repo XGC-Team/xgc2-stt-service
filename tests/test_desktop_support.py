@@ -20,7 +20,8 @@ def test_streaming_url_targets_api_and_encodes_credentials() -> None:
     settings = DesktopSettings(endpoint="https://stt.example.test/base", api_key="a key/+", trim_leading_silence=False)
     assert streaming_url(settings) == (
         "wss://stt.example.test/v1/audio/transcriptions/stream?"
-        "sample_rate=16000&output_script=simplified&trim_leading_silence=0&access_token=a+key%2F%2B"
+        "sample_rate=16000&output_script=simplified&trim_leading_silence=0&silence_commit_ms=2000&"
+        "access_token=a+key%2F%2B"
     )
 
 
@@ -43,6 +44,7 @@ def test_auto_enter_is_off_by_default() -> None:
 
     assert settings.auto_enter is False
     assert settings.hotkey == "<f8>"
+    assert settings.silence_commit_ms == 2000
 
 
 def test_auto_enter_only_submits_silence_final() -> None:

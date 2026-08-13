@@ -13,23 +13,28 @@ from typing import Any
 
 from pynput.keyboard import Controller as KeyboardController
 from pynput.keyboard import GlobalHotKeys, Key
-from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal, Slot
+from PySide6.QtGui import QAction, QCloseEvent, QCursor, QTextCursor
 from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
-    QFormLayout,
+    QDoubleSpinBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QStyle,
     QSystemTrayIcon,
+    QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -196,16 +201,14 @@ class FocusTracker:
             return int(getattr(focus, "id", focus))
         return None
 
-    def geometry(self) -> tuple[int, int, int, int] | None:
+    def pointer(self) -> tuple[int, int] | None:
         if self._display is None:
             return None
         with suppress(Exception):
             self._display.sync()
-            focus = self._display.get_input_focus().focus
             root = self._display.screen().root
-            geometry = focus.get_geometry()
-            translated = focus.translate_coords(root, 0, 0)
-            return int(translated.x), int(translated.y), int(geometry.width), int(geometry.height)
+            pointer = root.query_pointer()
+            return int(pointer.root_x), int(pointer.root_y)
         return None
 
 
@@ -302,12 +305,36 @@ class TextInjector:
 class SettingsDialog(QDialog):
     def __init__(self, settings: DesktopSettings, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setWindowTitle("XGC2 STT 设置")
+        self.setWindowTitle("XGC2 STT · 设置")
         self.setModal(True)
+        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
+        self.setMinimumSize(480, 440)
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        available_height = screen.availableGeometry().height() if screen is not None else 720
+        self.resize(560, min(680, max(480, int(available_height * 0.9))))
+        if screen is not None:
+            area = screen.availableGeometry()
+            self.move(area.center().x() - self.width() // 2, area.center().y() - self.height() // 2)
+
         self.endpoint = QLineEdit(settings.endpoint)
+        self.endpoint.setPlaceholderText("http://127.0.0.1:34897")
         self.api_key = QLineEdit(settings.api_key)
         self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.api_key.setPlaceholderText("输入服务器分配的 API Key")
+        self.api_key_visibility = QToolButton()
+        self.api_key_visibility.setText("显示")
+        self.api_key_visibility.setCheckable(True)
+        self.api_key_visibility.setObjectName("revealButton")
+        self.api_key_visibility.setFixedWidth(58)
+        self.api_key_visibility.toggled.connect(self._toggle_api_key)
         self.hotkey = QLineEdit(settings.hotkey)
+        self.hotkey.setPlaceholderText("<f8>")
+        self.silence_seconds = QDoubleSpinBox()
+        self.silence_seconds.setRange(0.5, 30.0)
+        self.silence_seconds.setSingleStep(0.5)
+        self.silence_seconds.setDecimals(1)
+        self.silence_seconds.setSuffix(" 秒")
+        self.silence_seconds.setValue(settings.silence_commit_ms / 1000)
         self.output_script = QComboBox()
         self.output_script.addItem("简体中文", "simplified")
         self.output_script.addItem("模型原样", "original")
@@ -323,26 +350,190 @@ class SettingsDialog(QDialog):
         self.start_at_login = QCheckBox()
         self.start_at_login.setChecked(settings.start_at_login)
 
-        form = QFormLayout()
-        form.addRow("服务器", self.endpoint)
-        form.addRow("API Key", self.api_key)
-        form.addRow("快捷键", self.hotkey)
-        form.addRow("中文输出", self.output_script)
-        form.addRow("开头静音", self.trim_silence)
-        form.addRow("粘贴方式", self.paste_shortcut)
-        form.addRow("自动回车", self.auto_enter)
-        form.addRow("开机自启", self.start_at_login)
+        connection, connection_layout = self._section("连接")
+        connection_layout.addWidget(self._field("服务器 URL", self.endpoint))
+        api_key_row = QHBoxLayout()
+        api_key_row.setContentsMargins(0, 0, 0, 0)
+        api_key_row.setSpacing(8)
+        api_key_row.addWidget(self.api_key, 1)
+        api_key_row.addWidget(self.api_key_visibility)
+        connection_layout.addWidget(self._field("访问密钥", api_key_row))
+
+        recognition, recognition_layout = self._section("识别")
+        recognition_grid = QGridLayout()
+        recognition_grid.setContentsMargins(0, 0, 0, 0)
+        recognition_grid.setHorizontalSpacing(12)
+        recognition_grid.setVerticalSpacing(0)
+        recognition_grid.setColumnStretch(0, 1)
+        recognition_grid.setColumnStretch(1, 1)
+        recognition_grid.setColumnStretch(2, 1)
+        recognition_grid.addWidget(self._field("输出文字", self.output_script), 0, 0)
+        recognition_grid.addWidget(self._field("停顿定稿", self.silence_seconds), 0, 1)
+        recognition_grid.addWidget(self._field("全局快捷键", self.hotkey), 0, 2)
+        recognition_layout.addLayout(recognition_grid)
+        self.trim_silence.setText("跳过开头静音")
+        recognition_layout.addWidget(self.trim_silence)
+
+        input_section, input_layout = self._section("输入")
+        input_layout.addWidget(self._field("粘贴方式", self.paste_shortcut))
+        self.auto_enter.setText("停顿定稿后自动回车")
+        self.start_at_login.setText("登录系统时自动启动")
+        input_layout.addWidget(self.auto_enter)
+        input_layout.addWidget(self.start_at_login)
+
+        content = QWidget()
+        content.setObjectName("settingsContent")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(18, 18, 18, 12)
+        content_layout.setSpacing(12)
+        content_layout.addWidget(connection)
+        content_layout.addWidget(recognition)
+        content_layout.addWidget(input_section)
+        content_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(content)
+
         cancel = QPushButton("取消")
+        cancel.setObjectName("secondaryButton")
         cancel.clicked.connect(self.reject)
-        save = QPushButton("保存")
+        save = QPushButton("保存设置")
+        save.setObjectName("primaryButton")
+        save.setDefault(True)
         save.clicked.connect(self.accept)
         actions = QHBoxLayout()
+        actions.setContentsMargins(18, 12, 18, 12)
+        actions.setSpacing(8)
         actions.addStretch(1)
         actions.addWidget(cancel)
         actions.addWidget(save)
+
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(scroll, 1)
         layout.addLayout(actions)
+        self.setStyleSheet(self._stylesheet())
+
+    @staticmethod
+    def _section(title: str) -> tuple[QFrame, QVBoxLayout]:
+        section = QFrame()
+        section.setObjectName("settingsSection")
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(16, 14, 16, 16)
+        layout.setSpacing(12)
+        heading = QLabel(title)
+        heading.setObjectName("sectionHeading")
+        layout.addWidget(heading)
+        return section, layout
+
+    @staticmethod
+    def _field(label: str, control: QWidget | QHBoxLayout) -> QWidget:
+        field = QWidget()
+        layout = QVBoxLayout(field)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+        caption = QLabel(label)
+        caption.setObjectName("fieldLabel")
+        layout.addWidget(caption)
+        if isinstance(control, QWidget):
+            layout.addWidget(control)
+        else:
+            layout.addLayout(control)
+        return field
+
+    @Slot(bool)
+    def _toggle_api_key(self, visible: bool) -> None:
+        self.api_key.setEchoMode(QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password)
+        self.api_key_visibility.setText("隐藏" if visible else "显示")
+
+    @staticmethod
+    def _stylesheet() -> str:
+        return """
+            QDialog { background: #111720; color: #e9eef5; }
+            QWidget#settingsContent, QScrollArea#settingsScroll,
+            QScrollArea#settingsScroll > QWidget > QWidget { background: #111720; }
+            QFrame#settingsSection {
+                background: #19212c;
+                border: 1px solid #2d3948;
+                border-radius: 9px;
+            }
+            QLabel#sectionHeading {
+                color: #f4f7fb;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QLabel#fieldLabel {
+                color: #9eaabd;
+                font-size: 11px;
+                font-weight: 500;
+            }
+            QLineEdit, QComboBox, QDoubleSpinBox {
+                min-height: 38px;
+                padding: 0 11px;
+                color: #edf2f8;
+                background: #10161e;
+                border: 1px solid #354354;
+                border-radius: 6px;
+                selection-background-color: #315fdc;
+            }
+            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus { border: 1px solid #6f91f3; }
+            QComboBox { padding-right: 28px; }
+            QComboBox::drop-down { width: 26px; border: 0; }
+            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0; border: 0; }
+            QComboBox QAbstractItemView {
+                color: #edf2f8;
+                background: #19212c;
+                border: 1px solid #354354;
+                selection-background-color: #294b9f;
+                outline: 0;
+            }
+            QCheckBox {
+                min-height: 24px;
+                color: #d9e0e9;
+                spacing: 9px;
+            }
+            QCheckBox::indicator {
+                width: 17px;
+                height: 17px;
+            }
+            QPushButton, QToolButton#revealButton {
+                min-height: 36px;
+                padding: 0 15px;
+                color: #dce4ee;
+                background: #202a37;
+                border: 1px solid #374558;
+                border-radius: 6px;
+            }
+            QPushButton:hover, QToolButton#revealButton:hover {
+                background: #283548;
+                border-color: #4c5d73;
+            }
+            QPushButton#primaryButton {
+                color: white;
+                background: #315fdc;
+                border-color: #527cf0;
+                font-weight: 600;
+            }
+            QPushButton#primaryButton:hover { background: #294fae; }
+            QPushButton:focus, QToolButton:focus { border-color: #8ba7f7; }
+            QScrollBar:vertical {
+                width: 8px;
+                margin: 4px 1px;
+                background: transparent;
+            }
+            QScrollBar::handle:vertical {
+                min-height: 30px;
+                background: #3c495b;
+                border-radius: 3px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
+        """
 
     def values(self) -> DesktopSettings:
         return DesktopSettings(
@@ -351,6 +542,7 @@ class SettingsDialog(QDialog):
             hotkey=self.hotkey.text().strip(),
             output_script=str(self.output_script.currentData()),
             trim_leading_silence=self.trim_silence.isChecked(),
+            silence_commit_ms=round(self.silence_seconds.value() * 1000),
             paste_shortcut=str(self.paste_shortcut.currentData()),
             auto_enter=self.auto_enter.isChecked(),
             start_at_login=self.start_at_login.isChecked(),
@@ -365,10 +557,12 @@ class Overlay(QWidget):
         self.setFixedSize(560, 112)
         self.dot = QLabel("●")
         self.label = QLabel("待机")
-        self.preview = QLabel("")
-        self.preview.setTextFormat(Qt.TextFormat.RichText)
-        self.preview.setWordWrap(True)
-        self.preview.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.preview = QTextEdit()
+        self.preview.setReadOnly(True)
+        self.preview.setUndoRedoEnabled(False)
+        self.preview.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.preview.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.preview.document().setDocumentMargin(0)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
@@ -382,7 +576,12 @@ class Overlay(QWidget):
         self.setStyleSheet(
             "QWidget { background:#181e27; color:#cdd6e2; border:1px solid #303a46; border-radius:6px; }"
             "QLabel { border:0; }"
-            "QLabel#transcriptPreview { font-size:15px; color:#eef2f7; }"
+            "QTextEdit#transcriptPreview { font-size:15px; color:#eef2f7; background:transparent; "
+            "border:0; padding:0; }"
+            "QScrollBar:vertical { width:6px; margin:0; background:transparent; }"
+            "QScrollBar::handle:vertical { min-height:24px; background:#465468; border-radius:3px; }"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:transparent; }"
         )
         self.preview.setObjectName("transcriptPreview")
         self.set_state("待机", "#79b88c")
@@ -393,21 +592,22 @@ class Overlay(QWidget):
         self.preview.hide()
         self.setFixedSize(154, 38)
 
-    def show_near_focus(self, geometry: tuple[int, int, int, int] | None) -> None:
-        self.setFixedSize(560, 112)
+    def show_near_focus(self, anchor: tuple[int, int] | None) -> None:
+        self.setFixedSize(560, 136)
         self.preview.show()
-        screen = QApplication.primaryScreen()
+        if anchor is None:
+            cursor = QCursor.pos()
+            anchor = (cursor.x(), cursor.y())
+        anchor_x, anchor_y = anchor
+        screen = QApplication.screenAt(QPoint(anchor_x, anchor_y)) or QApplication.primaryScreen()
         if screen is None:
             self.show()
             return
         area = screen.availableGeometry()
-        if geometry is None:
-            x = area.center().x() - self.width() // 2
-            y = area.bottom() - self.height() - 48
-        else:
-            focus_x, focus_y, focus_width, focus_height = geometry
-            x = focus_x + focus_width // 2 - self.width() // 2
-            y = focus_y + focus_height - self.height() - 48
+        x = anchor_x - 36
+        y_below = anchor_y + 24
+        y_above = anchor_y - self.height() - 24
+        y = y_below if y_below + self.height() <= area.bottom() - 8 else y_above
         x = max(area.left() + 8, min(x, area.right() - self.width() - 8))
         y = max(area.top() + 8, min(y, area.bottom() - self.height() - 8))
         self.move(x, y)
@@ -416,12 +616,6 @@ class Overlay(QWidget):
     def set_preview(self, stable: str, unstable: str, text: str) -> None:
         if stable + unstable != text:
             stable = text[: max(0, len(text) - len(unstable))]
-        max_characters = 220
-        if len(unstable) >= max_characters:
-            stable = ""
-            unstable = "…" + unstable[-(max_characters - 1) :]
-        elif len(stable) + len(unstable) > max_characters:
-            stable = "…" + stable[-max(0, max_characters - len(unstable) - 1) :]
         stable_markup = escape(stable).replace("\n", "<br>")
         unstable_markup = escape(unstable).replace("\n", "<br>")
         if unstable_markup:
@@ -429,7 +623,11 @@ class Overlay(QWidget):
                 '<span style="color:#ffe2a8; background-color:#664817; font-weight:600;">'
                 f"{unstable_markup}</span>"
             )
-        self.preview.setText(stable_markup + unstable_markup)
+        self.preview.setHtml(stable_markup + unstable_markup)
+        cursor = self.preview.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        self.preview.setTextCursor(cursor)
+        self.preview.ensureCursorVisible()
 
     def set_state(self, label: str, color: str) -> None:
         self.label.setText(label)
@@ -518,7 +716,7 @@ class ClientController(QObject):
         self._sync_tray()
         self.overlay.set_state("连接中", "#d7ae66")
         self.injector.begin(self.settings.paste_shortcut)
-        self.overlay.show_near_focus(self.injector.focus.geometry())
+        self.overlay.show_near_focus(self.injector.focus.pointer())
         worker = StreamingWorker(self.settings)
         self.worker = worker
         worker.signals.connected.connect(self._start_audio)
@@ -591,7 +789,7 @@ class ClientController(QObject):
     def open_settings(self) -> None:
         if self.state != "idle":
             return
-        dialog = SettingsDialog(self.settings, self.overlay)
+        dialog = SettingsDialog(self.settings)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         candidate = dialog.values()

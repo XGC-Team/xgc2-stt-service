@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     qwen_unfixed_chunk_num: int = Field(default=4, ge=1, le=16)
     qwen_unfixed_token_num: int = Field(default=5, ge=1, le=64)
     max_active_streams: int = Field(default=1, ge=1, le=128)
-    silence_commit_ms: int = Field(default=3000, ge=500, le=30_000)
+    silence_commit_ms: int = Field(default=2000, ge=500, le=30_000)
     api_key_store_path: str = "/var/lib/xgc2-stt/api-keys.json"
     runtime_settings_path: str = "/var/lib/xgc2-stt/runtime-settings.json"
     gpu_metrics_enabled: bool = True

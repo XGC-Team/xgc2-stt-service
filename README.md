@@ -148,7 +148,7 @@ revisable suffix is rendered as gray text on a light background.
 stops recording. By default the gateway drops initial silence before the first
 speech frame and normalizes Chinese output to Simplified Chinese; both are
 operator settings in the WebUI. English and other Latin text is not translated.
-Three seconds of silence finalizes the current segment and removes its gray
+Two seconds of silence finalizes the current segment by default and removes its gray
 revisable tail without stopping the microphone or WebSocket. Speech after a
 long pause starts the next segment and appends to the existing transcript.
 Clearing while capture is active replaces only the model session: the current
@@ -196,14 +196,16 @@ xgc2-stt-client
 
 The client streams PCM to the service and, only while recognition is active,
 shows each replacement hypothesis in a non-activating transient preview near
-the focused window. The preview hides as soon as the session finishes or
-fails. Stable text is bright and the still-revisable tail is highlighted. Only
-a server-finalized segment is pasted
+the pointer position from which capture starts. Positioning uses global X11
+coordinates and the monitor containing that point; near a lower screen edge it
+automatically opens above the pointer. The preview hides as soon as the session
+finishes or fails. Stable text is bright and the still-revisable tail is
+highlighted. Only a server-finalized segment is pasted
 once into the terminal/input field that held focus when recording began, so
 model revisions never churn the target and Chinese input methods cannot turn a
 paste chord into transcript text. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V`
 are selectable. The client never presses Enter by default.
-When **Auto Enter** is enabled, each non-empty three-second silence-finalized
+When **Auto Enter** is enabled, each non-empty silence-finalized
 segment is submitted with Enter, while the same microphone/WebSocket continues
 for the next spoken request. Focus changes suppress both injection and Enter.
 Autostart is optional and creates a per-user desktop entry; client settings and
@@ -233,7 +235,7 @@ language detection and does not expose those controls.
 Streaming endpoint:
 
 ```text
-ws://127.0.0.1:34897/v1/audio/transcriptions/stream?sample_rate=16000&output_script=simplified&trim_leading_silence=1
+ws://127.0.0.1:34897/v1/audio/transcriptions/stream?sample_rate=16000&output_script=simplified&trim_leading_silence=1&silence_commit_ms=2000
 ```
 
 After `session.started`, send binary mono PCM16LE chunks. The gateway maps
@@ -248,7 +250,9 @@ After a silence final, the connection remains open and later speech starts the
 next segment. Send `{"type":"commit"}` to finalize the current segment and end
 the client session; its final event has `session_complete:true`. `reset` cancels
 without committing. `output_script` accepts `simplified` or `original`, while
-`trim_leading_silence` accepts a boolean. These are gateway controls; Voxtral
+`trim_leading_silence` accepts a boolean. `silence_commit_ms` accepts an integer
+from 500 through 30000 and overrides the server default for that WebSocket
+session. These are gateway controls; Voxtral
 Realtime still performs automatic language detection and does not accept a
 request-level language hint. The API-only port does not expose the WebUI or
 documentation; local management documentation remains available on port 34896.

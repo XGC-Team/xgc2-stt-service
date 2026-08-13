@@ -77,7 +77,7 @@ async def handle_stream(
     websocket: WebSocket,
     engine: SpeechEngine,
     *,
-    silence_commit_ms: int = 3000,
+    silence_commit_ms: int = 2000,
     silence_threshold: int = 250,
     on_audio_bytes: Callable[[int], None] | None = None,
 ) -> None:
@@ -130,6 +130,23 @@ async def handle_stream(
         )
         await websocket.close(code=4400)
         return
+    silence_commit_value = websocket.query_params.get("silence_commit_ms")
+    if silence_commit_value is not None:
+        try:
+            session_silence_commit_ms = int(silence_commit_value)
+        except ValueError:
+            session_silence_commit_ms = 0
+        if not 500 <= session_silence_commit_ms <= 30_000:
+            await websocket.send_json(
+                next_event(
+                    "error",
+                    code="invalid_silence_commit_ms",
+                    message="silence_commit_ms must be an integer from 500 to 30000",
+                )
+            )
+            await websocket.close(code=4400)
+            return
+        silence_commit_ms = session_silence_commit_ms
 
     status = engine.status()
     if status.get("state") != "ready":
