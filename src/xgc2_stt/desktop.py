@@ -13,7 +13,7 @@ from typing import Any
 
 from pynput.keyboard import Controller as KeyboardController
 from pynput.keyboard import GlobalHotKeys, Key
-from PySide6.QtCore import QObject, QPoint, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QCursor, QTextCursor
 from PySide6.QtMultimedia import QAudioFormat, QAudioSource, QMediaDevices
 from PySide6.QtWidgets import (
@@ -200,17 +200,6 @@ class FocusTracker:
             focus = self._display.get_input_focus().focus
             return int(getattr(focus, "id", focus))
         return None
-
-    def pointer(self) -> tuple[int, int] | None:
-        if self._display is None:
-            return None
-        with suppress(Exception):
-            self._display.sync()
-            root = self._display.screen().root
-            pointer = root.query_pointer()
-            return int(pointer.root_x), int(pointer.root_y)
-        return None
-
 
 class TextInjector:
     def __init__(self, application: QApplication):
@@ -592,24 +581,16 @@ class Overlay(QWidget):
         self.preview.hide()
         self.setFixedSize(154, 38)
 
-    def show_near_focus(self, anchor: tuple[int, int] | None) -> None:
+    def show_bottom_center(self) -> None:
         self.setFixedSize(560, 136)
         self.preview.show()
-        if anchor is None:
-            cursor = QCursor.pos()
-            anchor = (cursor.x(), cursor.y())
-        anchor_x, anchor_y = anchor
-        screen = QApplication.screenAt(QPoint(anchor_x, anchor_y)) or QApplication.primaryScreen()
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         if screen is None:
             self.show()
             return
         area = screen.availableGeometry()
-        x = anchor_x - 36
-        y_below = anchor_y + 24
-        y_above = anchor_y - self.height() - 24
-        y = y_below if y_below + self.height() <= area.bottom() - 8 else y_above
-        x = max(area.left() + 8, min(x, area.right() - self.width() - 8))
-        y = max(area.top() + 8, min(y, area.bottom() - self.height() - 8))
+        x = area.center().x() - self.width() // 2
+        y = area.bottom() - self.height() - 48
         self.move(x, y)
         self.show()
 
@@ -716,7 +697,7 @@ class ClientController(QObject):
         self._sync_tray()
         self.overlay.set_state("连接中", "#d7ae66")
         self.injector.begin(self.settings.paste_shortcut)
-        self.overlay.show_near_focus(self.injector.focus.pointer())
+        self.overlay.show_bottom_center()
         worker = StreamingWorker(self.settings)
         self.worker = worker
         worker.signals.connected.connect(self._start_audio)
