@@ -4,6 +4,18 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - ".xgc2/**"
+      - ".github/workflows/client-deb-ci.yml"
+      - ".github/workflows/client-deb.yml"
+      - ".github/workflows/review.yml"
+      - ".gitignore"
+      - "src/xgc2_stt/desktop.py"
+      - "src/xgc2_stt/desktop_support.py"
+      - "tests/test_desktop_support.py"
+      - "tests/test_desktop_audio.py"
+      - "README.md"
+      - "THIRD_PARTY_NOTICES.md"
   workflow_dispatch:
 
 permissions:
@@ -38,7 +50,7 @@ jobs:
 
       - name: Run source gates
         run: |
-          uv sync --frozen --extra dev
+          uv sync --frozen --extra dev --extra desktop
           uv run ruff check src tests scripts/verify-stream.py
           uv run pytest
           npm --prefix web ci

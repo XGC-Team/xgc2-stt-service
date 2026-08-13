@@ -4,8 +4,8 @@ set -euo pipefail
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${repo_dir}"
 
-uv run --frozen --python 3.12 --extra dev ruff check src tests scripts/verify-stream.py
-uv run --frozen --python 3.12 --extra dev pytest
+uv run --frozen --python 3.12 --extra dev --extra desktop ruff check src tests scripts/verify-stream.py
+uv run --frozen --python 3.12 --extra dev --extra desktop pytest
 npm --prefix web ci
 npm --prefix web run test
 npm --prefix web run typecheck

@@ -8,3 +8,5 @@ web/dist/
 web/node_modules/
 web/*.tsbuildinfo
 data/
+debs/
+.ci/
