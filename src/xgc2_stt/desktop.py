@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStyle,
     QSystemTrayIcon,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -359,8 +358,6 @@ class SettingsDialog(QDialog):
 
 
 class Overlay(QWidget):
-    settings_requested = Signal()
-
     def __init__(self):
         super().__init__()
         self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -372,16 +369,11 @@ class Overlay(QWidget):
         self.preview.setTextFormat(Qt.TextFormat.RichText)
         self.preview.setWordWrap(True)
         self.preview.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.gear = QToolButton()
-        self.gear.setText("⚙")
-        self.gear.setToolTip("设置")
-        self.gear.clicked.connect(self.settings_requested)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
         header.addWidget(self.dot)
         header.addWidget(self.label, 1)
-        header.addWidget(self.gear)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 7, 8, 9)
         layout.setSpacing(5)
@@ -389,9 +381,8 @@ class Overlay(QWidget):
         layout.addWidget(self.preview, 1)
         self.setStyleSheet(
             "QWidget { background:#181e27; color:#cdd6e2; border:1px solid #303a46; border-radius:6px; }"
-            "QLabel { border:0; } QToolButton { border:0; background:transparent; padding:4px; }"
+            "QLabel { border:0; }"
             "QLabel#transcriptPreview { font-size:15px; color:#eef2f7; }"
-            "QToolButton:hover { background:#293542; }"
         )
         self.preview.setObjectName("transcriptPreview")
         self.set_state("待机", "#79b88c")
@@ -401,13 +392,6 @@ class Overlay(QWidget):
         self.preview.clear()
         self.preview.hide()
         self.setFixedSize(154, 38)
-
-    def show_top_right(self) -> None:
-        screen = QApplication.primaryScreen()
-        if screen is not None:
-            area = screen.availableGeometry()
-            self.move(area.right() - self.width() - 16, area.top() + 16)
-        self.show()
 
     def show_near_focus(self, geometry: tuple[int, int, int, int] | None) -> None:
         self.setFixedSize(560, 112)
@@ -468,7 +452,6 @@ class ClientController(QObject):
         self.capture: AudioCapture | None = None
         self.injector = TextInjector(application)
         self.overlay = Overlay()
-        self.overlay.settings_requested.connect(self.open_settings)
         self.toggle_requested.connect(self.toggle)
         self.hotkeys: GlobalHotKeys | None = None
         self._shutting_down = False
@@ -476,20 +459,36 @@ class ClientController(QObject):
 
         icon = application.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
         self.tray = QSystemTrayIcon(icon, application)
-        menu = QMenu()
-        settings_action = QAction("设置", menu)
-        settings_action.triggered.connect(self.open_settings)
-        quit_action = QAction("退出", menu)
+        self.tray_menu = QMenu()
+        self.capture_action = QAction("开始录音", self.tray_menu)
+        self.capture_action.triggered.connect(self.toggle)
+        self.settings_action = QAction("设置", self.tray_menu)
+        self.settings_action.triggered.connect(self.open_settings)
+        quit_action = QAction("退出", self.tray_menu)
         quit_action.triggered.connect(self.shutdown)
-        menu.addAction(settings_action)
-        menu.addSeparator()
-        menu.addAction(quit_action)
-        self.tray.setContextMenu(menu)
+        self.tray_menu.addAction(self.capture_action)
+        self.tray_menu.addSeparator()
+        self.tray_menu.addAction(self.settings_action)
+        self.tray_menu.addAction(quit_action)
+        self.tray.setContextMenu(self.tray_menu)
         self.tray.activated.connect(
             lambda reason: self.toggle() if reason == QSystemTrayIcon.ActivationReason.Trigger else None
         )
         self.tray.show()
-        self.overlay.show_top_right()
+        self.overlay.hide()
+        self._sync_tray()
+
+    def _sync_tray(self) -> None:
+        label, tooltip, enabled = {
+            "idle": ("开始录音", "XGC2 STT · 待机", True),
+            "connecting": ("停止录音", "XGC2 STT · 连接中", True),
+            "recording": ("停止录音", "XGC2 STT · 录音中", True),
+            "finalizing": ("正在收尾", "XGC2 STT · 收尾", False),
+        }[self.state]
+        self.capture_action.setText(label)
+        self.capture_action.setEnabled(enabled)
+        self.settings_action.setEnabled(self.state == "idle")
+        self.tray.setToolTip(tooltip)
 
     def _start_hotkey(self) -> None:
         if self.hotkeys is not None:
@@ -516,8 +515,8 @@ class ClientController(QObject):
             self._show_error(str(exc))
             return
         self.state = "connecting"
+        self._sync_tray()
         self.overlay.set_state("连接中", "#d7ae66")
-        self.overlay.gear.setEnabled(False)
         self.injector.begin(self.settings.paste_shortcut)
         self.overlay.show_near_focus(self.injector.focus.geometry())
         worker = StreamingWorker(self.settings)
@@ -542,6 +541,7 @@ class ClientController(QObject):
             self._stream_failed(str(exc))
             return
         self.state = "recording"
+        self._sync_tray()
         self.overlay.set_state("录音中", "#df8589")
 
     def stop_recording(self) -> None:
@@ -549,6 +549,7 @@ class ClientController(QObject):
             self.capture.stop()
             self.capture = None
         self.state = "finalizing"
+        self._sync_tray()
         self.overlay.set_state("收尾", "#d7ae66")
         self.worker.commit() if self.worker is not None else self._finish_session()
 
@@ -581,10 +582,10 @@ class ClientController(QObject):
         self.worker = None
         self.injector.end()
         self.state = "idle"
-        self.overlay.gear.setEnabled(True)
         self.overlay.set_state("待机", "#79b88c")
         self.overlay.set_idle_size()
-        self.overlay.show_top_right()
+        self.overlay.hide()
+        self._sync_tray()
 
     @Slot()
     def open_settings(self) -> None:
@@ -610,8 +611,15 @@ class ClientController(QObject):
 
     def _show_error(self, message: str) -> None:
         self.overlay.set_state("错误", "#df8589")
+        self.tray.setToolTip("XGC2 STT · 错误")
         self.tray.showMessage("XGC2 STT", message, QSystemTrayIcon.MessageIcon.Critical, 5000)
-        QTimer.singleShot(2500, lambda: self.overlay.set_state("待机", "#79b88c") if self.state == "idle" else None)
+        QTimer.singleShot(2500, self._restore_idle_status)
+
+    @Slot()
+    def _restore_idle_status(self) -> None:
+        if self.state == "idle":
+            self.overlay.set_state("待机", "#79b88c")
+            self._sync_tray()
 
     @Slot()
     def shutdown(self) -> None:

@@ -13,5 +13,5 @@ if ! command -v xdotool >/dev/null 2>&1 || ! command -v xclip >/dev/null 2>&1; t
   exit 1
 fi
 
-uv tool install --force "${repo_dir}[desktop]"
+uv tool install --force --refresh "${repo_dir}[desktop]"
 echo "Installed xgc2-stt-client. Run it once, then configure API URL, key, hotkey, auto-enter, and autostart."

@@ -174,9 +174,11 @@ No supported setting requires entering the container or rebuilding the image.
 ## Desktop client
 
 The repository includes a native PySide6 client for Linux/X11. It is one local
-process, not another browser frontend/backend. A small always-on-top status
-window and tray icon expose settings; the default global shortcut is
-`F8`. It deliberately avoids `Ctrl+Shift` because common Linux Chinese input
+process, not another browser frontend/backend. Like Clash, it lives in the
+desktop status area while idle: its tray menu provides start/stop, Settings,
+and Quit, and a left click toggles capture. No idle window occupies the
+desktop. The default global shortcut is `F8`. It deliberately avoids
+`Ctrl+Shift` because common Linux Chinese input
 methods use that modifier family for input-method and simplified/traditional
 switching. The first press connects and starts microphone capture, and
 the next press commits and stops. The default API URL is
@@ -192,9 +194,11 @@ the Qt event loop cannot leak a literal `V` into the focused input:
 xgc2-stt-client
 ```
 
-The client streams PCM to the service and shows each replacement hypothesis in
-a non-activating overlay near the focused window. Stable text is bright and the
-still-revisable tail is highlighted. Only a server-finalized segment is pasted
+The client streams PCM to the service and, only while recognition is active,
+shows each replacement hypothesis in a non-activating transient preview near
+the focused window. The preview hides as soon as the session finishes or
+fails. Stable text is bright and the still-revisable tail is highlighted. Only
+a server-finalized segment is pasted
 once into the terminal/input field that held focus when recording began, so
 model revisions never churn the target and Chinese input methods cannot turn a
 paste chord into transcript text. Terminal `Ctrl+Shift+V` and desktop `Ctrl+V`
