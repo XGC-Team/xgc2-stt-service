@@ -4,7 +4,7 @@ ARG QWEN_VLLM_IMAGE=vllm/vllm-openai:v0.14.0@sha256:1d6866b87630d94f5e0cdae55ab5
 FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS web-builder
 
 WORKDIR /build/web
-COPY web/package.json web/package-lock.json ./
+COPY web/package.json web/package-lock.json web/.npmrc ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
