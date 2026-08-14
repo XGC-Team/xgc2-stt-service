@@ -28,26 +28,15 @@ jobs:
   checks:
     name: Source checks
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
-        with:
-          python-version: "3.12"
-          enable-cache: true
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install source-gate tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ripgrep
 
       - name: Run source gates
         run: |
@@ -58,15 +47,30 @@ jobs:
           npm --prefix web run test
           npm --prefix web run typecheck
           npm --prefix web run build
+          bash -n scripts/*.sh
+
+  compose:
+    name: Compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Validate Compose files
+        run: |
           docker compose config >/dev/null
           STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
-          bash -n scripts/*.sh
 
   release-guard:
     name: Validate immutable release
     if: ${{ github.event_name == 'workflow_dispatch' }}
-    needs: checks
+    needs: [checks, compose]
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
       packages: read
@@ -88,7 +92,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          version="$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           source_sha="$(git rev-parse HEAD)"
 
           [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]] || {
@@ -147,8 +151,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update >/dev/null
-          sudo apt-get install -y --no-install-recommends jq skopeo >/dev/null
+          command -v jq >/dev/null
+          command -v skopeo >/dev/null
 
           authdir="$(mktemp -d)"
           trap 'rm -rf "${authdir}"' EXIT
@@ -299,18 +303,20 @@ jobs:
           [[ "${namespace}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$ ]]
           target="${registry}/${namespace}/xgc2-stt-service"
 
-          sudo apt-get update >/dev/null
-          sudo apt-get install -y --no-install-recommends jq skopeo >/dev/null
           authdir="$(mktemp -d)"
           trap 'rm -rf "${authdir}"' EXIT
-          authfile="${authdir}/auth.json"
-          printf '%s' "${GHCR_TOKEN}" | skopeo login --authfile "${authfile}" \
-            --username "${GITHUB_ACTOR}" --password-stdin ghcr.io >/dev/null
-          printf '%s' "${EXTRA_PASSWORD}" | skopeo login --authfile "${authfile}" \
-            --username "${EXTRA_USERNAME}" --password-stdin "${registry}" >/dev/null
+          printf '%s' "${GHCR_TOKEN}" | docker run --rm -i \
+            -v "${authdir}:/auth" \
+            quay.io/skopeo/stable \
+            login --authfile /auth/auth.json --username "${GITHUB_ACTOR}" --password-stdin ghcr.io >/dev/null
+          printf '%s' "${EXTRA_PASSWORD}" | docker run --rm -i \
+            -v "${authdir}:/auth" \
+            quay.io/skopeo/stable \
+            login --authfile /auth/auth.json --username "${EXTRA_USERNAME}" --password-stdin "${registry}" >/dev/null
 
           mirror_tags="${authdir}/mirror-tags.json"
-          skopeo list-tags --authfile "${authfile}" "docker://${target}" > "${mirror_tags}"
+          docker run --rm -v "${authdir}:/auth" quay.io/skopeo/stable \
+            list-tags --authfile /auth/auth.json "docker://${target}" > "${mirror_tags}"
           jq -e '.Tags | type == "array"' "${mirror_tags}" >/dev/null
           if jq -e --arg tag "${RELEASE_TAG}" '.Tags | index($tag) != null' "${mirror_tags}" >/dev/null; then
             echo "Extra mirror release tag ${RELEASE_TAG} appeared after validation; refusing to overwrite" >&2
@@ -319,15 +325,19 @@ jobs:
 
           source="docker://${IMAGE}@${BUILD_DIGEST}"
           destination="docker://${target}:${RELEASE_TAG}"
-          source_revision="$(skopeo inspect --override-os linux --override-arch amd64 \
-            --authfile "${authfile}" --format '{{ index .Labels "org.opencontainers.image.revision" }}' "${source}")"
+          source_revision="$(docker run --rm -v "${authdir}:/auth" quay.io/skopeo/stable \
+            inspect --override-os linux --override-arch amd64 \
+            --authfile /auth/auth.json --format '{{ index .Labels "org.opencontainers.image.revision" }}' "${source}")"
           [[ "${source_revision}" == "${SOURCE_SHA}" ]]
-          skopeo copy --override-os linux --override-arch amd64 \
-            --authfile "${authfile}" "${source}" "${destination}"
+          docker run --rm -v "${authdir}:/auth" quay.io/skopeo/stable \
+            copy --override-os linux --override-arch amd64 \
+            --authfile /auth/auth.json "${source}" "${destination}"
 
-          source_digest="$(skopeo inspect --override-os linux --override-arch amd64 \
-            --authfile "${authfile}" --format '{{.Digest}}' "${source}")"
-          destination_digest="$(skopeo inspect --override-os linux --override-arch amd64 \
-            --authfile "${authfile}" --format '{{.Digest}}' "${destination}")"
+          source_digest="$(docker run --rm -v "${authdir}:/auth" quay.io/skopeo/stable \
+            inspect --override-os linux --override-arch amd64 \
+            --authfile /auth/auth.json --format '{{.Digest}}' "${source}")"
+          destination_digest="$(docker run --rm -v "${authdir}:/auth" quay.io/skopeo/stable \
+            inspect --override-os linux --override-arch amd64 \
+            --authfile /auth/auth.json --format '{{.Digest}}' "${destination}")"
           [[ "${source_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
           [[ "${destination_digest}" == "${source_digest}" ]]

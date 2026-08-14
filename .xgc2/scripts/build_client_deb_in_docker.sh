@@ -6,6 +6,7 @@ repo_root="$(cd "${script_dir}/../.." && pwd)"
 architecture="${TARGET_ARCH:-$(dpkg --print-architecture)}"
 distribution="${PACKAGE_DISTRIBUTION:-focal}"
 output_dir="${OUTPUT_DIR:-${repo_root}/debs}"
+image_tag="${XGC2_BUILD_IMAGE_TAG:-1.0.0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -17,9 +18,9 @@ while [[ $# -gt 0 ]]; do
 done
 case "${architecture}" in amd64) platform=linux/amd64 ;; arm64) platform=linux/arm64 ;; *) exit 2 ;; esac
 case "${distribution}" in
-  focal) ubuntu_image=ubuntu:20.04 ;;
-  jammy) ubuntu_image=ubuntu:22.04 ;;
-  noble) ubuntu_image=ubuntu:24.04 ;;
+  focal) build_image="${XGC2_CLIENT_BUILD_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:${image_tag}}" ;;
+  jammy) build_image="${XGC2_CLIENT_BUILD_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:${image_tag}}" ;;
+  noble) build_image="${XGC2_CLIENT_BUILD_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:${image_tag}}" ;;
   *) echo "Supported distributions: focal, jammy, noble." >&2; exit 2 ;;
 esac
 command -v docker >/dev/null
@@ -30,11 +31,6 @@ network_args=()
 if [[ -n "${DOCKER_NETWORK:-}" ]]; then
   network_args=(--network "${DOCKER_NETWORK}")
 fi
-apt_mirror="${XGC2_CLIENT_APT_MIRROR:-}"
-if [[ -n "${apt_mirror}" && ! "${apt_mirror}" =~ ^https?://[A-Za-z0-9._:/-]+$ ]]; then
-  echo "XGC2_CLIENT_APT_MIRROR must be an HTTP(S) URL without query parameters." >&2
-  exit 2
-fi
 
 docker run --rm --platform "${platform}" "${network_args[@]}" \
   -e DEBIAN_FRONTEND=noninteractive \
@@ -44,23 +40,11 @@ docker run --rm --platform "${platform}" "${network_args[@]}" \
   -e SOURCE_DATE_EPOCH="${source_date_epoch}" \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \
-  -e APT_MIRROR="${apt_mirror}" \
   -v "${repo_root}:/workspace:ro" \
   -v "${output_dir}:/out" \
-  "${ubuntu_image}" bash -lc '
+  "${build_image}" bash -lc '
     set -euo pipefail
     restore_host_ownership() { chown -R "${HOST_UID}:${HOST_GID}" /out || true; }
     trap restore_host_ownership EXIT
-    if [[ -n "${APT_MIRROR}" ]]; then
-      mirror="${APT_MIRROR%/}"
-      if [[ -f /etc/apt/sources.list ]]; then
-        sed -i -E "s#https?://(archive|security)\\.ubuntu\\.com/ubuntu#${mirror}#g" /etc/apt/sources.list
-      fi
-      if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
-        sed -i -E "s#https?://(archive|security)\\.ubuntu\\.com/ubuntu#${mirror}#g" /etc/apt/sources.list.d/ubuntu.sources
-      fi
-    fi
-    apt-get -o Acquire::Retries=5 update >/dev/null
-    apt-get install -y --no-install-recommends ca-certificates dpkg-dev python3 >/dev/null
     /workspace/.xgc2/scripts/build_client_deb.sh
   '

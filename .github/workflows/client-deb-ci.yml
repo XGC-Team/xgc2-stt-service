@@ -57,15 +57,13 @@ concurrency:
 jobs:
   source-tests:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: "3.12"
-      - name: Install source-gate tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ripgrep
       - name: Run mandatory source and package gates
         run: |
           uv sync --frozen --extra dev --extra desktop
@@ -84,39 +82,37 @@ jobs:
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: focal
-            ubuntu_image: ubuntu:20.04
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: jammy
-            ubuntu_image: ubuntu:22.04
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:1.0.0
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: noble
-            ubuntu_image: ubuntu:24.04
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: focal
-            ubuntu_image: ubuntu:20.04
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: jammy
-            ubuntu_image: ubuntu:22.04
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: noble
-            ubuntu_image: ubuntu:24.04
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.9.24"
-          enable-cache: true
       - name: Build ${{ matrix.distribution }} Deb
+        env:
+          XGC2_CLIENT_BUILD_IMAGE: ${{ matrix.build_image }}
         run: |
           ./.xgc2/scripts/build_client_deb_in_docker.sh \
             --distribution "${{ matrix.distribution }}" \
@@ -126,12 +122,11 @@ jobs:
         run: |
           docker run --rm --platform "${{ matrix.platform }}" \
             -e TARGET_ARCH="${{ matrix.architecture }}" \
-            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.ubuntu_image }} bash -lc '
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.build_image }} bash -lc '
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
               apt-get -o Acquire::Retries=5 update >/dev/null
               apt-get install -y --no-install-recommends ./debs/xgc2-stt-client_*.deb >/dev/null
-              apt-get install -y --no-install-recommends dbus-x11 xauth xvfb >/dev/null
               ./.xgc2/scripts/smoke_client_deb.sh ./debs/xgc2-stt-client_*.deb
             '
       - name: Create trusted build manifest

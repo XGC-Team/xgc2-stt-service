@@ -14,26 +14,15 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v6
-        with:
-          python-version: "3.12"
-          enable-cache: true
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install source-gate tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ripgrep
-
-      - name: Source, WebUI, Compose, and shell checks
+      - name: Source, WebUI, and shell checks
         run: |
           uv sync --frozen --extra dev --extra desktop
           uv run ruff check src tests scripts/verify-stream.py
@@ -42,10 +31,18 @@ jobs:
           npm --prefix web run test
           npm --prefix web run typecheck
           npm --prefix web run build
-          docker compose config >/dev/null
-          STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
           bash -n scripts/*.sh
           ./.xgc2/scripts/check_client_package.sh
+
+  review-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose config
+        run: |
+          docker compose config >/dev/null
+          STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
 
       - uses: docker/setup-buildx-action@v3
 
