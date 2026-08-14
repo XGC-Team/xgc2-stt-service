@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise a frozen desktop client against real X11 and microphone hardware."""
+"""Exercise a packaged desktop client against real X11 and microphone hardware."""
 
 from __future__ import annotations
 
@@ -83,14 +83,27 @@ def require_machine(binary: Path) -> tuple[Path, str]:
         raise GateFailure(f"xdotool cannot access the X11 display: {detail}")
 
     try:
-        import sounddevice
+        import pyaudio
 
-        device = sounddevice.query_devices(kind="input")
-        sounddevice.check_input_settings(device=None, channels=1, dtype="int16", samplerate=16_000)
+        audio = pyaudio.PyAudio()
+        try:
+            device = audio.get_default_input_device_info()
+        finally:
+            audio.terminate()
+        if int(device.get("maxInputChannels") or 0) < 1:
+            raise GateFailure("default microphone exposes no input channel")
+    except ImportError:
+        try:
+            import sounddevice
+
+            device = sounddevice.query_devices(kind="input")
+            sounddevice.check_input_settings(device=None, channels=1, dtype="int16", samplerate=16_000)
+        except Exception as exc:
+            raise GateFailure(f"default microphone is unavailable at 16 kHz mono int16: {exc}") from exc
+        if int(device["max_input_channels"]) < 1:
+            raise GateFailure("default microphone exposes no input channel")
     except Exception as exc:
-        raise GateFailure(f"default microphone is unavailable at 16 kHz mono int16: {exc}") from exc
-    if int(device["max_input_channels"]) < 1:
-        raise GateFailure("default microphone exposes no input channel")
+        raise GateFailure(f"default microphone is unavailable: {exc}") from exc
     return candidate, xdotool
 
 
@@ -202,7 +215,6 @@ async def run_gate(binary: Path, xdotool: str) -> SessionState:
                 {
                     "XDG_CONFIG_HOME": str(config_home),
                     "XDG_SESSION_TYPE": "x11",
-                    "QT_QPA_PLATFORM": "xcb",
                 }
             )
             process = await asyncio.create_subprocess_exec(

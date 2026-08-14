@@ -126,11 +126,11 @@ cached metrics and do not invoke `nvidia-smi`.
 
 ## Desktop client
 
-`xgc2-stt-client` is a PySide6/Qt 6 tray application for Ubuntu 20.04, 22.04,
-and 24.04 on both X11 and Wayland. Qt 6.7 is used because it already ships as
-a Focal-compatible wheel (manylinux_2_28) with a status-notifier tray, native
-Wayland and X11 plugins, and no extra web runtime. Launch it from the command
-line; it stays in the system status area and does not require a main window.
+`xgc2-stt-client` is a GTK 3 status-area application for Ubuntu 20.04, 22.04,
+and 24.04 on both X11 and Wayland. It uses the distribution Python, PyGObject,
+and Ayatana/AppIndicator instead of a bundled Qt or CPython runtime. Launch it
+from the command line; it stays in the system status area and does not require
+a main window.
 
 ![Desktop client settings](docs/assets/desktop-settings.png)
 
@@ -169,7 +169,7 @@ There is no APT repository.
 
 ```bash
 # Example: Ubuntu 22.04 amd64. Use ubuntu-20.04 or ubuntu-24.04 as needed.
-sudo dpkg -i xgc2-stt-client_0.1.0-1_amd64.ubuntu-22.04.deb
+sudo dpkg -i xgc2-stt-client_0.2.0-1_amd64.ubuntu-22.04.deb
 sudo apt-get install -f
 xgc2-stt-client
 ```
@@ -255,11 +255,11 @@ scripts/verify-gpu.sh
 
 Before publishing a desktop package, run the physical X11 gate on a workstation
 with a real default microphone. It opens a local test WebSocket, toggles the
-frozen client through X11, requires live PCM and a commit, and rejects forbidden
-multimedia runtimes:
+installed client through X11, requires live PCM and a commit, and rejects
+forbidden multimedia runtimes:
 
 ```bash
-.xgc2/scripts/physical_client_x11.py /opt/xgc2-stt-client/xgc2-stt-client
+.xgc2/scripts/physical_client_x11.py /usr/bin/xgc2-stt-client
 ```
 
 CI builds separate Ubuntu 20.04, 22.04, and 24.04 `.deb` files. This leaf

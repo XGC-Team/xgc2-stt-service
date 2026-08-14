@@ -1,7 +1,7 @@
 schema: xgc2.product.v1
 id: xgc2-stt-client
 name: XGC2 STT Desktop Client
-version: 0.1.0-1
+version: 0.2.0-1
 kind: desktop-deb
 summary: Tray client for a user-supplied XGC2-compatible streaming STT API.
 groups:
@@ -20,7 +20,7 @@ apt:
 usage:
   install: 'Download the Ubuntu matching .deb from GitHub Releases, then:
 
-    sudo dpkg -i xgc2-stt-client_0.1.0-1_amd64.ubuntu-22.04.deb
+    sudo dpkg -i xgc2-stt-client_0.2.0-1_amd64.ubuntu-22.04.deb
 
     sudo apt-get install -f
 
@@ -36,8 +36,8 @@ usage:
     published on GitHub Releases, not through an APT repository.
 ownership:
   paths:
-  - /opt/xgc2-stt-client
   - /usr/bin/xgc2-stt-client
+  - /usr/lib/python3/dist-packages/xgc2_stt
   - /usr/share/applications/xgc2-stt-client.desktop
   - /usr/share/metainfo/io.xgc2.stt-client.metainfo.xml
 release:
@@ -46,6 +46,6 @@ release:
   workflow: client-deb.yml
   ci_workflow: client-deb-ci.yml
   apt_versions:
-    focal: 0.1.0-1
-    jammy: 0.1.0-1
-    noble: 0.1.0-1
+    focal: 0.2.0-1
+    jammy: 0.2.0-1
+    noble: 0.2.0-1

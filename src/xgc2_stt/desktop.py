@@ -4,49 +4,25 @@ import json
 import queue
 import sys
 import threading
+from collections.abc import Callable
 from contextlib import suppress
 from html import escape
 from typing import Any
 
-from pynput.keyboard import GlobalHotKeys, HotKey, Key, KeyCode
-from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent, QCursor, QMouseEvent, QTextCursor
-from PySide6.QtWidgets import (
-    QApplication,
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDoubleSpinBox,
-    QFrame,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QMenu,
-    QMessageBox,
-    QPushButton,
-    QScrollArea,
-    QStyle,
-    QSystemTrayIcon,
-    QTextEdit,
-    QToolButton,
-    QVBoxLayout,
-    QWidget,
-)
-from websockets.sync.client import connect
+import gi
 from Xlib import XK, X, display, error
 
-from . import __version__
 from .desktop_audio import AudioCapture
 from .desktop_support import (
+    CLIENT_BINARY,
     DesktopIpcListener,
     DesktopSettings,
     InsertionOutcome,
-    apply_qt_platform,
     insert_finalized_text,
     is_wayland_session,
     load_desktop_settings,
     packaged_client_command,
+    parse_hotkey,
     save_desktop_settings,
     set_autostart,
     should_auto_enter,
@@ -54,50 +30,49 @@ from .desktop_support import (
     streaming_url,
 )
 
+gi.require_version("Gdk", "3.0")
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gdk, Gio, GLib, Gtk
+
 _COMMIT = object()
 _CANCEL = object()
 
 
-def _parse_hotkey(specification: str) -> tuple[int, frozenset[str]]:
-    modifier_names = {
-        "alt": "alt",
-        "alt_l": "alt",
-        "alt_r": "alt",
-        "cmd": "super",
-        "cmd_l": "super",
-        "cmd_r": "super",
-        "ctrl": "ctrl",
-        "ctrl_l": "ctrl",
-        "ctrl_r": "ctrl",
-        "shift": "shift",
-        "shift_l": "shift",
-        "shift_r": "shift",
-    }
-    modifiers: set[str] = set()
-    keysyms: list[int] = []
-    for key in HotKey.parse(specification):
-        modifier_name = key.name if isinstance(key, Key) else None
-        if modifier_name in modifier_names:
-            modifiers.add(modifier_names[modifier_name])
-            continue
-        if isinstance(key, KeyCode):
-            keysym = key.vk if key.vk is not None else XK.string_to_keysym(key.char or "")
-        else:
-            value = key.value
-            keysym = getattr(value, "vk", value)
-        if not isinstance(keysym, int) or keysym <= 0:
-            raise ValueError("快捷键包含 X11 无法识别的按键")
-        keysyms.append(keysym)
-    if len(keysyms) != 1:
-        raise ValueError("快捷键必须包含且只能包含一个非修饰键")
-    return keysyms[0], frozenset(modifiers)
+def _load_appindicator() -> Any:
+    try:
+        gi.require_version("AyatanaAppIndicator3", "0.1")
+        from gi.repository import AyatanaAppIndicator3 as AppIndicator3
+
+        return AppIndicator3
+    except (ValueError, ImportError):
+        gi.require_version("AppIndicator3", "0.1")
+        from gi.repository import AppIndicator3
+
+        return AppIndicator3
+
+
+def _notify(title: str, message: str, icon: str = "dialog-information") -> None:
+    try:
+        gi.require_version("Notify", "0.7")
+        from gi.repository import Notify
+
+        if not Notify.is_initted():
+            Notify.init("XGC2 STT")
+        Notify.Notification.new(title, message, icon).show()
+    except Exception:
+        return
+
+
+def _ui(func: Callable[..., Any], *args: Any) -> None:
+    def runner() -> bool:
+        func(*args)
+        return False
+
+    GLib.idle_add(runner)
 
 
 def _modifier_mask_for_keysyms(x_display: Any, keysym_names: tuple[str, ...]) -> int:
-    keycodes = {
-        x_display.keysym_to_keycode(XK.string_to_keysym(name))
-        for name in keysym_names
-    } - {0}
+    keycodes = {x_display.keysym_to_keycode(XK.string_to_keysym(name)) for name in keysym_names} - {0}
     for index, mapped_keycodes in enumerate(x_display.get_modifier_mapping()):
         if keycodes.intersection(mapped_keycodes):
             return 1 << index
@@ -133,7 +108,7 @@ class ExclusiveX11HotKey:
     """A passive X11 key grab that doesn't leak the shortcut into the focused app."""
 
     def __init__(self, specification: str, callback: Any):
-        self.keysym, self.modifier_names = _parse_hotkey(specification)
+        self.keysym_name, self.modifier_names = parse_hotkey(specification)
         self.callback = callback
         self._display: Any = None
         self._root: Any = None
@@ -166,7 +141,10 @@ class ExclusiveX11HotKey:
         try:
             self._display = display.Display()
             self._root = self._display.screen().root
-            self._keycode = self._display.keysym_to_keycode(self.keysym)
+            keysym = XK.string_to_keysym(self.keysym_name)
+            if not keysym:
+                raise ValueError("快捷键包含 X11 无法识别的按键")
+            self._keycode = self._display.keysym_to_keycode(keysym)
             if not self._keycode:
                 raise ValueError("快捷键在当前 X11 键盘映射中不可用")
             self._modifiers, self._ignored_modifier_masks = _x11_modifier_masks(
@@ -206,10 +184,6 @@ class ExclusiveX11HotKey:
                 event = self._display.next_event()
             else:
                 continue
-            # X11 can interleave MappingNotify and other housekeeping events
-            # with grabbed key events. Those events do not expose ``detail``;
-            # inspect the type before reading key-specific fields so one
-            # keyboard-map notification cannot terminate the listener.
             if event.type not in (X.KeyPress, X.KeyRelease):
                 continue
             if event.detail != self._keycode:
@@ -258,27 +232,35 @@ class ExclusiveX11HotKey:
         self._thread = None
 
 
-def create_hotkey_listener(specification: str, callback: Any) -> ExclusiveX11HotKey | GlobalHotKeys:
-    _parse_hotkey(specification)
+def create_hotkey_listener(specification: str, callback: Any) -> ExclusiveX11HotKey:
+    parse_hotkey(specification)
     if is_wayland_session():
-        return GlobalHotKeys({specification: callback})
+        raise RuntimeError(
+            "Wayland 下全局抓键不可用。请使用状态栏菜单，或把系统快捷键绑定到 xgc2-stt-client --toggle-capture。"
+        )
     return ExclusiveX11HotKey(specification, callback)
 
 
-class StreamSignals(QObject):
-    connected = Signal()
-    hypothesis = Signal(str, str, str)
-    state = Signal(str)
-    segment_completed = Signal(str)
-    failed = Signal(str)
-    completed = Signal()
-
-
 class StreamingWorker:
-    def __init__(self, settings: DesktopSettings):
+    def __init__(
+        self,
+        settings: DesktopSettings,
+        *,
+        on_connected: Callable[[], None],
+        on_hypothesis: Callable[[str, str, str], None],
+        on_state: Callable[[str], None],
+        on_segment: Callable[[str], None],
+        on_failed: Callable[[str], None],
+        on_completed: Callable[[], None],
+    ):
         self.settings = settings
-        self.signals = StreamSignals()
-        self._outgoing: queue.Queue[bytes | object] = queue.Queue()
+        self.on_connected = on_connected
+        self.on_hypothesis = on_hypothesis
+        self.on_state = on_state
+        self.on_segment = on_segment
+        self.on_failed = on_failed
+        self.on_completed = on_completed
+        self._outgoing: queue.Queue[Any] = queue.Queue()
         self._thread = threading.Thread(target=self._run, name="xgc2-stt-stream", daemon=True)
 
     def start(self) -> None:
@@ -295,61 +277,67 @@ class StreamingWorker:
         self._outgoing.put(_CANCEL)
 
     def _run(self) -> None:
+        from websocket import ABNF, WebSocketTimeoutException, create_connection
+
         final_received = False
+        socket = None
         try:
-            with connect(
-                streaming_url(self.settings),
-                additional_headers=streaming_headers(self.settings),
-                open_timeout=10,
-                close_timeout=5,
-                max_size=4 * 1024 * 1024,
-            ) as socket:
-                first = json.loads(socket.recv(timeout=15))
-                if first.get("type") != "session.started":
-                    raise RuntimeError(first.get("message") or "服务未创建识别会话")
-                self.signals.connected.emit()
-                while True:
-                    try:
-                        outgoing = self._outgoing.get(timeout=0.01)
-                    except queue.Empty:
-                        outgoing = None
-                    if outgoing is _CANCEL:
-                        socket.send(json.dumps({"type": "close"}))
+            headers = [f"{key}: {value}" for key, value in streaming_headers(self.settings).items()]
+            connect_options = {"timeout": 10}
+            if headers:
+                connect_options["header"] = headers
+            socket = create_connection(streaming_url(self.settings), **connect_options)
+            socket.settimeout(15)
+            first = json.loads(socket.recv())
+            if first.get("type") != "session.started":
+                raise RuntimeError(first.get("message") or "服务未创建识别会话")
+            _ui(self.on_connected)
+            socket.settimeout(0.01)
+            while True:
+                try:
+                    outgoing = self._outgoing.get(timeout=0.01)
+                except queue.Empty:
+                    outgoing = None
+                if outgoing is _CANCEL:
+                    socket.send(json.dumps({"type": "close"}))
+                    return
+                if outgoing is _COMMIT:
+                    socket.send(json.dumps({"type": "commit"}))
+                    _ui(self.on_state, "收尾")
+                elif isinstance(outgoing, bytes):
+                    socket.send(outgoing, opcode=ABNF.OPCODE_BINARY)
+                try:
+                    raw = socket.recv()
+                except (WebSocketTimeoutException, TimeoutError):
+                    continue
+                event = json.loads(raw)
+                event_type = event.get("type")
+                if event_type == "transcript.partial":
+                    text = str(event.get("text") or "")
+                    stable = str(event.get("stable_text") or "")
+                    unstable = str(event.get("unstable_text") or "")
+                    if not stable and not unstable:
+                        unstable = text
+                    _ui(self.on_hypothesis, text, stable, unstable)
+                elif event_type == "transcript.final":
+                    final_text = str(event.get("text") or "")
+                    if final_text:
+                        _ui(self.on_hypothesis, final_text, final_text, "")
+                    _ui(self.on_segment, str(event.get("reason") or "commit"))
+                    if event.get("session_complete", True):
+                        final_received = True
                         return
-                    if outgoing is _COMMIT:
-                        socket.send(json.dumps({"type": "commit"}))
-                        self.signals.state.emit("收尾")
-                    elif isinstance(outgoing, bytes):
-                        socket.send(outgoing)
-                    try:
-                        raw = socket.recv(timeout=0.01)
-                    except TimeoutError:
-                        continue
-                    event = json.loads(raw)
-                    event_type = event.get("type")
-                    if event_type == "transcript.partial":
-                        text = str(event.get("text") or "")
-                        stable = str(event.get("stable_text") or "")
-                        unstable = str(event.get("unstable_text") or "")
-                        if not stable and not unstable:
-                            unstable = text
-                        self.signals.hypothesis.emit(text, stable, unstable)
-                    elif event_type == "transcript.final":
-                        final_text = str(event.get("text") or "")
-                        if final_text:
-                            self.signals.hypothesis.emit(final_text, final_text, "")
-                        self.signals.segment_completed.emit(str(event.get("reason") or "commit"))
-                        if event.get("session_complete", True):
-                            final_received = True
-                            return
-                        self.signals.state.emit("录音中")
-                    elif event_type == "error":
-                        raise RuntimeError(str(event.get("message") or event.get("code") or "识别失败"))
+                    _ui(self.on_state, "录音中")
+                elif event_type == "error":
+                    raise RuntimeError(str(event.get("message") or event.get("code") or "识别失败"))
         except Exception as exc:
-            self.signals.failed.emit(str(exc))
+            _ui(self.on_failed, str(exc))
         finally:
+            if socket is not None:
+                with suppress(Exception):
+                    socket.close()
             if final_received:
-                self.signals.completed.emit()
+                _ui(self.on_completed)
 
 
 class FocusTracker:
@@ -358,8 +346,6 @@ class FocusTracker:
         if is_wayland_session():
             return
         with suppress(Exception):
-            from Xlib import display
-
             self._display = display.Display()
 
     def current(self) -> int | None:
@@ -371,9 +357,9 @@ class FocusTracker:
             return int(getattr(focus, "id", focus))
         return None
 
+
 class TextInjector:
-    def __init__(self, application: QApplication):
-        self.application = application
+    def __init__(self):
         self.focus = FocusTracker()
         self.target_focus: int | None = None
         self.hypothesis = ""
@@ -382,11 +368,14 @@ class TextInjector:
         self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
         self.shortcut = "terminal"
 
+    def _clipboard(self) -> Gtk.Clipboard:
+        return Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+
     def begin(self, shortcut: str) -> None:
         self.target_focus = self.focus.current()
         self.hypothesis = ""
         self.shortcut = shortcut
-        self.original_clipboard = self.application.clipboard().text()
+        self.original_clipboard = self._clipboard().wait_for_text() or ""
         self.last_clipboard = ""
         self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
 
@@ -397,9 +386,10 @@ class TextInjector:
         self.hypothesis = hypothesis
         return True
 
-    def _paste(self, text: str, *, send_enter: bool = False) -> InsertionOutcome:
+    def _paste(self, text: str, send_enter: bool = False) -> InsertionOutcome:
         def set_clipboard(value: str) -> None:
-            self.application.clipboard().setText(value)
+            self._clipboard().set_text(value, -1)
+            self._clipboard().store()
 
         outcome = insert_finalized_text(
             text,
@@ -414,15 +404,17 @@ class TextInjector:
         return outcome
 
     def end(self) -> None:
-        clipboard = self.application.clipboard()
-        if self.last_clipboard and clipboard.text() == self.last_clipboard:
-            clipboard.setText(self.original_clipboard)
+        clipboard = self._clipboard()
+        current = clipboard.wait_for_text() or ""
+        if self.last_clipboard and current == self.last_clipboard:
+            clipboard.set_text(self.original_clipboard, -1)
+            clipboard.store()
         self.target_focus = None
         self.hypothesis = ""
         self.last_clipboard = ""
         self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
 
-    def commit_segment(self, *, auto_enter: bool = False) -> bool:
+    def commit_segment(self, auto_enter: bool = False) -> bool:
         has_text = bool(self.hypothesis)
         current_focus = self.focus.current()
         focus_matches = self.target_focus is None or current_focus == self.target_focus
@@ -434,437 +426,271 @@ class TextInjector:
         return focus_matches
 
 
-class SettingsDialog(QDialog):
-    def __init__(self, settings: DesktopSettings, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setWindowTitle("XGC2 STT · 设置")
-        self.setModal(True)
-        self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
-        self.setMinimumSize(480, 440)
-        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
-        available_height = screen.availableGeometry().height() if screen is not None else 720
-        self.resize(560, min(680, max(480, int(available_height * 0.9))))
-        if screen is not None:
-            area = screen.availableGeometry()
-            self.move(area.center().x() - self.width() // 2, area.center().y() - self.height() // 2)
+def _apply_css(widget: Gtk.Widget, css: str) -> None:
+    provider = Gtk.CssProvider()
+    provider.load_from_data(css.encode("utf-8"))
+    widget.get_style_context().add_provider(provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-        self.endpoint = QLineEdit(settings.endpoint)
-        self.endpoint.setPlaceholderText("输入自有 STT API URL")
-        self.api_key = QLineEdit(settings.api_key)
-        self.api_key.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key.setPlaceholderText("输入服务器分配的 API Key")
-        self.api_key_visibility = QToolButton()
-        self.api_key_visibility.setText("显示")
-        self.api_key_visibility.setCheckable(True)
-        self.api_key_visibility.setObjectName("revealButton")
-        self.api_key_visibility.setFixedWidth(58)
-        self.api_key_visibility.toggled.connect(self._toggle_api_key)
-        self.hotkey = QLineEdit(settings.hotkey)
-        self.hotkey.setPlaceholderText("<f9>")
-        self.silence_seconds = QDoubleSpinBox()
-        self.silence_seconds.setRange(0.5, 30.0)
-        self.silence_seconds.setSingleStep(0.5)
-        self.silence_seconds.setDecimals(1)
-        self.silence_seconds.setSuffix(" 秒")
-        self.silence_seconds.setValue(settings.silence_commit_ms / 1000)
-        self.output_script = QComboBox()
-        self.output_script.addItem("简体中文", "simplified")
-        self.output_script.addItem("模型原样", "original")
-        self.output_script.setCurrentIndex(max(0, self.output_script.findData(settings.output_script)))
-        self.trim_silence = QCheckBox()
-        self.trim_silence.setChecked(settings.trim_leading_silence)
-        self.paste_shortcut = QComboBox()
-        self.paste_shortcut.addItem("终端 Ctrl+Shift+V", "terminal")
-        self.paste_shortcut.addItem("桌面 Ctrl+V", "desktop")
-        self.paste_shortcut.setCurrentIndex(max(0, self.paste_shortcut.findData(settings.paste_shortcut)))
-        self.auto_enter = QCheckBox()
-        self.auto_enter.setChecked(settings.auto_enter)
-        self.start_at_login = QCheckBox()
-        self.start_at_login.setChecked(settings.start_at_login)
 
-        connection, connection_layout = self._section("连接")
-        connection_layout.addWidget(self._field("服务器 URL", self.endpoint))
-        api_key_row = QHBoxLayout()
-        api_key_row.setContentsMargins(0, 0, 0, 0)
-        api_key_row.setSpacing(8)
-        api_key_row.addWidget(self.api_key, 1)
-        api_key_row.addWidget(self.api_key_visibility)
-        connection_layout.addWidget(self._field("访问密钥", api_key_row))
+class SettingsDialog(Gtk.Dialog):
+    def __init__(self, settings: DesktopSettings, parent: Gtk.Window | None = None):
+        Gtk.Dialog.__init__(self, title="XGC2 STT · 设置", transient_for=parent, modal=True)
+        self.set_default_size(560, 520)
+        self.add_button("取消", Gtk.ResponseType.CANCEL)
+        save = self.add_button("保存设置", Gtk.ResponseType.OK)
+        save.get_style_context().add_class("suggested-action")
+        self.endpoint = Gtk.Entry()
+        self.endpoint.set_text(settings.endpoint)
+        self.endpoint.set_placeholder_text("输入自有 STT API URL")
+        self.api_key = Gtk.Entry()
+        self.api_key.set_text(settings.api_key)
+        self.api_key.set_visibility(False)
+        self.api_key.set_placeholder_text("输入服务器分配的 API Key")
+        self.api_key_visibility = Gtk.ToggleButton(label="显示")
+        self.api_key_visibility.connect("toggled", self._toggle_api_key)
+        self.hotkey = Gtk.Entry()
+        self.hotkey.set_text(settings.hotkey)
+        self.hotkey.set_placeholder_text("<f9>")
+        self.silence_seconds = Gtk.SpinButton.new_with_range(0.5, 30.0, 0.5)
+        self.silence_seconds.set_digits(1)
+        self.silence_seconds.set_value(settings.silence_commit_ms / 1000)
+        self.output_script = Gtk.ComboBoxText()
+        self.output_script.append("simplified", "简体中文")
+        self.output_script.append("original", "模型原样")
+        self.output_script.set_active_id(settings.output_script or "simplified")
+        self.trim_silence = Gtk.CheckButton(label="跳过开头静音")
+        self.trim_silence.set_active(settings.trim_leading_silence)
+        self.paste_shortcut = Gtk.ComboBoxText()
+        self.paste_shortcut.append("terminal", "终端 Ctrl+Shift+V")
+        self.paste_shortcut.append("desktop", "桌面 Ctrl+V")
+        self.paste_shortcut.set_active_id(settings.paste_shortcut or "terminal")
+        self.auto_enter = Gtk.CheckButton(label="停顿定稿后自动回车")
+        self.auto_enter.set_active(settings.auto_enter)
+        self.start_at_login = Gtk.CheckButton(label="登录系统时自动启动")
+        self.start_at_login.set_active(settings.start_at_login)
 
-        recognition, recognition_layout = self._section("识别")
-        recognition_grid = QGridLayout()
-        recognition_grid.setContentsMargins(0, 0, 0, 0)
-        recognition_grid.setHorizontalSpacing(12)
-        recognition_grid.setVerticalSpacing(0)
-        recognition_grid.setColumnStretch(0, 1)
-        recognition_grid.setColumnStretch(1, 1)
-        recognition_grid.setColumnStretch(2, 1)
-        recognition_grid.addWidget(self._field("输出文字", self.output_script), 0, 0)
-        recognition_grid.addWidget(self._field("停顿定稿", self.silence_seconds), 0, 1)
-        recognition_grid.addWidget(self._field("全局快捷键", self.hotkey), 0, 2)
-        recognition_layout.addLayout(recognition_grid)
-        self.trim_silence.setText("跳过开头静音")
-        recognition_layout.addWidget(self.trim_silence)
-
-        input_section, input_layout = self._section("输入")
-        input_layout.addWidget(self._field("粘贴方式", self.paste_shortcut))
-        self.auto_enter.setText("停顿定稿后自动回车")
-        self.start_at_login.setText("登录系统时自动启动")
-        input_layout.addWidget(self.auto_enter)
-        input_layout.addWidget(self.start_at_login)
-        hint = QLabel(
-            "客户端从命令行启动后驻留状态栏。登录自启动仅在勾选后写入 XDG autostart。"
-            " Wayland 下若全局快捷键不可用，可将系统快捷键绑定到 xgc2-stt-client --toggle-capture；"
-            " 无法注入按键时会把定稿文本留在剪贴板。"
+        content = self.get_content_area()
+        content.set_margin_top(12)
+        content.set_margin_bottom(8)
+        content.set_margin_start(16)
+        content.set_margin_end(16)
+        content.set_spacing(12)
+        content.add(self._labeled("服务器 URL", self.endpoint))
+        key_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        key_row.pack_start(self.api_key, True, True, 0)
+        key_row.pack_start(self.api_key_visibility, False, False, 0)
+        content.add(self._labeled("访问密钥", key_row))
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.pack_start(self._labeled("输出文字", self.output_script), True, True, 0)
+        row.pack_start(self._labeled("停顿定稿（秒）", self.silence_seconds), True, True, 0)
+        row.pack_start(self._labeled("全局快捷键", self.hotkey), True, True, 0)
+        content.add(row)
+        content.add(self.trim_silence)
+        content.add(self._labeled("粘贴方式", self.paste_shortcut))
+        content.add(self.auto_enter)
+        content.add(self.start_at_login)
+        hint = Gtk.Label(
+            label=(
+                "客户端从命令行启动后驻留状态栏。登录自启动仅在勾选后写入 XDG autostart。"
+                " Wayland 下若全局快捷键不可用，可将系统快捷键绑定到 xgc2-stt-client --toggle-capture；"
+                " 无法注入按键时会把定稿文本留在剪贴板。"
+            )
         )
-        hint.setWordWrap(True)
-        hint.setObjectName("fieldHint")
-        input_layout.addWidget(hint)
+        hint.set_line_wrap(True)
+        hint.set_xalign(0)
+        hint.get_style_context().add_class("dim-label")
+        content.add(hint)
+        self.show_all()
 
-        content = QWidget()
-        content.setObjectName("settingsContent")
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(18, 18, 18, 12)
-        content_layout.setSpacing(12)
-        content_layout.addWidget(connection)
-        content_layout.addWidget(recognition)
-        content_layout.addWidget(input_section)
-        content_layout.addStretch(1)
-
-        scroll = QScrollArea()
-        scroll.setObjectName("settingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setWidget(content)
-
-        cancel = QPushButton("取消")
-        cancel.setObjectName("secondaryButton")
-        cancel.clicked.connect(self.reject)
-        save = QPushButton("保存设置")
-        save.setObjectName("primaryButton")
-        save.setDefault(True)
-        save.clicked.connect(self.accept)
-        actions = QHBoxLayout()
-        actions.setContentsMargins(18, 12, 18, 12)
-        actions.setSpacing(8)
-        actions.addStretch(1)
-        actions.addWidget(cancel)
-        actions.addWidget(save)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(scroll, 1)
-        layout.addLayout(actions)
-        self.setStyleSheet(self._stylesheet())
+    def _toggle_api_key(self, button: Gtk.ToggleButton) -> None:
+        visible = button.get_active()
+        self.api_key.set_visibility(visible)
+        button.set_label("隐藏" if visible else "显示")
 
     @staticmethod
-    def _section(title: str) -> tuple[QFrame, QVBoxLayout]:
-        section = QFrame()
-        section.setObjectName("settingsSection")
-        layout = QVBoxLayout(section)
-        layout.setContentsMargins(16, 14, 16, 16)
-        layout.setSpacing(12)
-        heading = QLabel(title)
-        heading.setObjectName("sectionHeading")
-        layout.addWidget(heading)
-        return section, layout
-
-    @staticmethod
-    def _field(label: str, control: QWidget | QHBoxLayout) -> QWidget:
-        field = QWidget()
-        layout = QVBoxLayout(field)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
-        caption = QLabel(label)
-        caption.setObjectName("fieldLabel")
-        layout.addWidget(caption)
-        if isinstance(control, QWidget):
-            layout.addWidget(control)
-        else:
-            layout.addLayout(control)
-        return field
-
-    @Slot(bool)
-    def _toggle_api_key(self, visible: bool) -> None:
-        self.api_key.setEchoMode(QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password)
-        self.api_key_visibility.setText("隐藏" if visible else "显示")
-
-    @staticmethod
-    def _stylesheet() -> str:
-        return """
-            QDialog { background: #111720; color: #e9eef5; }
-            QWidget#settingsContent, QScrollArea#settingsScroll,
-            QScrollArea#settingsScroll > QWidget > QWidget { background: #111720; }
-            QFrame#settingsSection {
-                background: #19212c;
-                border: 1px solid #2d3948;
-                border-radius: 9px;
-            }
-            QLabel#sectionHeading {
-                color: #f4f7fb;
-                font-size: 14px;
-                font-weight: 600;
-            }
-            QLabel#fieldLabel {
-                color: #9eaabd;
-                font-size: 11px;
-                font-weight: 500;
-            }
-            QLabel#fieldHint {
-                color: #8b97a8;
-                font-size: 11px;
-                line-height: 1.4;
-            }
-            QLineEdit, QComboBox, QDoubleSpinBox {
-                min-height: 38px;
-                padding: 0 11px;
-                color: #edf2f8;
-                background: #10161e;
-                border: 1px solid #354354;
-                border-radius: 6px;
-                selection-background-color: #315fdc;
-            }
-            QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus { border: 1px solid #6f91f3; }
-            QComboBox { padding-right: 28px; }
-            QComboBox::drop-down { width: 26px; border: 0; }
-            QDoubleSpinBox::up-button, QDoubleSpinBox::down-button { width: 0; border: 0; }
-            QComboBox QAbstractItemView {
-                color: #edf2f8;
-                background: #19212c;
-                border: 1px solid #354354;
-                selection-background-color: #294b9f;
-                outline: 0;
-            }
-            QCheckBox {
-                min-height: 24px;
-                color: #d9e0e9;
-                spacing: 9px;
-            }
-            QCheckBox::indicator {
-                width: 17px;
-                height: 17px;
-            }
-            QPushButton, QToolButton#revealButton {
-                min-height: 36px;
-                padding: 0 15px;
-                color: #dce4ee;
-                background: #202a37;
-                border: 1px solid #374558;
-                border-radius: 6px;
-            }
-            QPushButton:hover, QToolButton#revealButton:hover {
-                background: #283548;
-                border-color: #4c5d73;
-            }
-            QPushButton#primaryButton {
-                color: white;
-                background: #315fdc;
-                border-color: #527cf0;
-                font-weight: 600;
-            }
-            QPushButton#primaryButton:hover { background: #294fae; }
-            QPushButton:focus, QToolButton:focus { border-color: #8ba7f7; }
-            QScrollBar:vertical {
-                width: 8px;
-                margin: 4px 1px;
-                background: transparent;
-            }
-            QScrollBar::handle:vertical {
-                min-height: 30px;
-                background: #3c495b;
-                border-radius: 3px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }
-        """
+    def _labeled(caption: str, widget: Gtk.Widget) -> Gtk.Box:
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        label = Gtk.Label(label=caption, xalign=0)
+        box.pack_start(label, False, False, 0)
+        box.pack_start(widget, True, True, 0)
+        return box
 
     def values(self) -> DesktopSettings:
         return DesktopSettings(
-            endpoint=self.endpoint.text().strip(),
-            api_key=self.api_key.text().strip(),
-            hotkey=self.hotkey.text().strip(),
-            output_script=str(self.output_script.currentData()),
-            trim_leading_silence=self.trim_silence.isChecked(),
-            silence_commit_ms=round(self.silence_seconds.value() * 1000),
-            paste_shortcut=str(self.paste_shortcut.currentData()),
-            auto_enter=self.auto_enter.isChecked(),
-            start_at_login=self.start_at_login.isChecked(),
+            endpoint=self.endpoint.get_text().strip(),
+            api_key=self.api_key.get_text().strip(),
+            hotkey=self.hotkey.get_text().strip(),
+            output_script=self.output_script.get_active_id() or "simplified",
+            trim_leading_silence=self.trim_silence.get_active(),
+            silence_commit_ms=round(self.silence_seconds.get_value() * 1000),
+            paste_shortcut=self.paste_shortcut.get_active_id() or "terminal",
+            auto_enter=self.auto_enter.get_active(),
+            start_at_login=self.start_at_login.get_active(),
         )
 
 
-class Overlay(QWidget):
+class Overlay(Gtk.Window):
     def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
-        self.setFixedSize(560, 112)
-        self._drag_offset: QPoint | None = None
-        self.dot = QLabel("●")
-        self.label = QLabel("待机")
-        self.dot.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.preview = QTextEdit()
-        self.preview.setReadOnly(True)
-        self.preview.setUndoRedoEnabled(False)
-        self.preview.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.preview.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        self.preview.document().setDocumentMargin(0)
-        self.drag_handle = QWidget()
-        self.drag_handle.setObjectName("dragHandle")
-        self.drag_handle.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.drag_handle.installEventFilter(self)
-        header = QHBoxLayout(self.drag_handle)
-        header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(8)
-        header.addWidget(self.dot)
-        header.addWidget(self.label, 1)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 7, 8, 9)
-        layout.setSpacing(5)
-        layout.addWidget(self.drag_handle)
-        layout.addWidget(self.preview, 1)
-        self.setStyleSheet(
-            "QWidget { background:#181e27; color:#cdd6e2; border:1px solid #303a46; border-radius:6px; }"
-            "QLabel { border:0; }"
-            "QTextEdit#transcriptPreview { font-size:15px; color:#eef2f7; background:transparent; "
-            "border:0; padding:0; }"
-            "QScrollBar:vertical { width:6px; margin:0; background:transparent; }"
-            "QScrollBar::handle:vertical { min-height:24px; background:#465468; border-radius:3px; }"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }"
-            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background:transparent; }"
+        Gtk.Window.__init__(self, type=Gtk.WindowType.POPUP)
+        self.set_decorated(False)
+        self.set_keep_above(True)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+        self.set_accept_focus(False)
+        self.set_resizable(False)
+        self._drag_x = 0
+        self._drag_y = 0
+        self._dragging = False
+        self.dot = Gtk.Label(label="●")
+        self.label = Gtk.Label(label="待机")
+        self.preview = Gtk.Label()
+        self.preview.set_line_wrap(True)
+        self.preview.set_xalign(0)
+        self.preview.set_max_width_chars(52)
+        header = Gtk.EventBox()
+        header_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header_box.pack_start(self.dot, False, False, 0)
+        header_box.pack_start(self.label, True, True, 0)
+        header.add(header_box)
+        header.connect("button-press-event", self._on_press)
+        header.connect("button-release-event", self._on_release)
+        header.connect("motion-notify-event", self._on_motion)
+        header.add_events(
+            Gdk.EventMask.BUTTON_PRESS_MASK
+            | Gdk.EventMask.BUTTON_RELEASE_MASK
+            | Gdk.EventMask.POINTER_MOTION_MASK
         )
-        self.preview.setObjectName("transcriptPreview")
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        root.set_margin_top(8)
+        root.set_margin_bottom(8)
+        root.set_margin_start(12)
+        root.set_margin_end(12)
+        root.pack_start(header, False, False, 0)
+        root.pack_start(self.preview, True, True, 0)
+        self.add(root)
+        _apply_css(
+            self,
+            """
+            window {
+              background-color: #181e27;
+              color: #cdd6e2;
+              border: 1px solid #303a46;
+              border-radius: 6px;
+            }
+            label { color: #eef2f7; }
+            """,
+        )
         self.set_state("待机", "#79b88c")
         self.set_idle_size()
+        self.connect("delete-event", lambda *_args: True)
 
     def set_idle_size(self) -> None:
-        self.preview.clear()
+        self.preview.set_text("")
         self.preview.hide()
-        self.setFixedSize(154, 38)
+        self.resize(154, 38)
 
     def show_bottom_center(self) -> None:
-        self.setFixedSize(560, 136)
         self.preview.show()
-        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
-        if screen is None:
-            self.show()
+        self.resize(560, 136)
+        display = Gdk.Display.get_default()
+        if display is None:
+            self.show_all()
             return
-        area = screen.availableGeometry()
-        x = area.center().x() - self.width() // 2
-        y = area.bottom() - self.height() - 48
+        seat = display.get_default_seat()
+        _screen, pointer_x, pointer_y = seat.get_pointer().get_position()
+        monitor = display.get_monitor_at_point(pointer_x, pointer_y) or display.get_primary_monitor()
+        area = monitor.get_geometry()
+        x = area.x + (area.width - 560) // 2
+        y = area.y + area.height - 136 - 48
         self.move(x, y)
-        self.show()
+        self.show_all()
 
     def set_preview(self, stable: str, unstable: str, text: str) -> None:
         if stable + unstable != text:
             stable = text[: max(0, len(text) - len(unstable))]
-        stable_markup = escape(stable).replace("\n", "<br>")
-        unstable_markup = escape(unstable).replace("\n", "<br>")
+        stable_markup = escape(stable).replace("\n", "&#10;")
+        unstable_markup = escape(unstable).replace("\n", "&#10;")
         if unstable_markup:
             unstable_markup = (
-                '<span style="color:#ffe2a8; background-color:#664817; font-weight:600;">'
-                f"{unstable_markup}</span>"
+                f'<span foreground="#ffe2a8" background="#664817" weight="bold">{unstable_markup}</span>'
             )
-        self.preview.setHtml(stable_markup + unstable_markup)
-        cursor = self.preview.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.preview.setTextCursor(cursor)
-        self.preview.ensureCursorVisible()
+        self.preview.set_markup(stable_markup + unstable_markup)
 
     def set_state(self, label: str, color: str) -> None:
-        self.label.setText(label)
-        self.dot.setStyleSheet(f"color:{color}; border:0;")
+        self.label.set_text(label)
+        self.dot.set_markup(f'<span foreground="{color}">●</span>')
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is not self.drag_handle or not isinstance(event, QMouseEvent):
-            return super().eventFilter(watched, event)
-        if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            self.drag_handle.setCursor(Qt.CursorShape.ClosedHandCursor)
-            event.accept()
-            return True
-        if event.type() == QEvent.Type.MouseMove and self._drag_offset is not None:
-            global_position = event.globalPosition().toPoint()
-            screen = QApplication.screenAt(global_position) or QApplication.primaryScreen()
-            target = global_position - self._drag_offset
-            if screen is not None:
-                area = screen.availableGeometry()
-                target.setX(max(area.left() + 8, min(target.x(), area.right() - self.width() - 8)))
-                target.setY(max(area.top() + 8, min(target.y(), area.bottom() - self.height() - 8)))
-            self.move(target)
-            event.accept()
-            return True
-        if event.type() == QEvent.Type.MouseButtonRelease and event.button() == Qt.MouseButton.LeftButton:
-            self._drag_offset = None
-            self.drag_handle.setCursor(Qt.CursorShape.OpenHandCursor)
-            event.accept()
-            return True
-        return super().eventFilter(watched, event)
+    def _on_press(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button != 1:
+            return False
+        self._dragging = True
+        win_x, win_y = self.get_position()
+        self._drag_x = int(event.x_root) - win_x
+        self._drag_y = int(event.y_root) - win_y
+        return True
 
-    def closeEvent(self, event: QCloseEvent) -> None:
-        event.ignore()
-        self.hide()
+    def _on_release(self, _widget: Gtk.Widget, event: Gdk.EventButton) -> bool:
+        if event.button == 1:
+            self._dragging = False
+        return True
+
+    def _on_motion(self, _widget: Gtk.Widget, event: Gdk.EventMotion) -> bool:
+        if not self._dragging:
+            return False
+        self.move(int(event.x_root) - self._drag_x, int(event.y_root) - self._drag_y)
+        return True
 
 
-class ClientController(QObject):
-    toggle_requested = Signal()
-    ipc_requested = Signal(str)
-    audio_failed = Signal(str)
-
-    def __init__(self, application: QApplication, *, start_capture: bool = False, open_settings: bool = False):
-        super().__init__()
+class ClientController:
+    def __init__(self, application: Gtk.Application, *, start_capture: bool = False, open_settings: bool = False):
         self.application = application
         self.settings = load_desktop_settings()
         self.state = "idle"
         self.worker: StreamingWorker | None = None
         self.capture: AudioCapture | None = None
-        self.injector = TextInjector(application)
+        self.injector = TextInjector()
         self.overlay = Overlay()
-        self.toggle_requested.connect(self.toggle)
-        self.ipc_requested.connect(self._handle_ipc)
-        self.audio_failed.connect(self._stream_failed)
-        self.hotkeys: ExclusiveX11HotKey | GlobalHotKeys | None = None
-        self._hotkey_binding: tuple[int, frozenset[str]] | None = None
+        self.hotkeys: ExclusiveX11HotKey | None = None
+        self._hotkey_binding: tuple[str, frozenset[str]] | None = None
         self._shutting_down = False
-        self._ipc = DesktopIpcListener(self.ipc_requested.emit)
+        self._ipc = DesktopIpcListener(lambda command: _ui(self._handle_ipc, command))
         self._ipc.start()
         self._start_hotkey()
 
-        icon = application.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
-        self.tray = QSystemTrayIcon(icon, application)
-        self.tray_menu = QMenu()
-        self.capture_action = QAction("开始录音", self.tray_menu)
-        self.capture_action.triggered.connect(self.toggle)
-        self.settings_action = QAction("设置", self.tray_menu)
-        self.settings_action.triggered.connect(self.open_settings)
-        quit_action = QAction("退出", self.tray_menu)
-        quit_action.triggered.connect(self.shutdown)
-        self.tray_menu.addAction(self.capture_action)
-        self.tray_menu.addSeparator()
-        self.tray_menu.addAction(self.settings_action)
-        self.tray_menu.addAction(quit_action)
-        self.tray.setContextMenu(self.tray_menu)
-        self.tray.activated.connect(
-            lambda reason: self.toggle() if reason == QSystemTrayIcon.ActivationReason.Trigger else None
+        AppIndicator3 = _load_appindicator()
+        self.indicator = AppIndicator3.Indicator.new(
+            "xgc2-stt-client",
+            "audio-input-microphone",
+            AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
-        self.tray.show()
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.menu = Gtk.Menu()
+        self.capture_item = Gtk.MenuItem(label="开始录音")
+        self.capture_item.connect("activate", lambda *_args: self.toggle())
+        self.settings_item = Gtk.MenuItem(label="设置")
+        self.settings_item.connect("activate", lambda *_args: self.open_settings())
+        quit_item = Gtk.MenuItem(label="退出")
+        quit_item.connect("activate", lambda *_args: self.shutdown())
+        self.menu.append(self.capture_item)
+        self.menu.append(Gtk.SeparatorMenuItem())
+        self.menu.append(self.settings_item)
+        self.menu.append(quit_item)
+        self.menu.show_all()
+        self.indicator.set_menu(self.menu)
         self.overlay.hide()
         self._sync_tray()
         if open_settings or not self.settings.endpoint:
-            QTimer.singleShot(0, self.open_settings)
+            GLib.idle_add(lambda: (self.open_settings(), False)[1])
         elif start_capture:
-            QTimer.singleShot(0, self.toggle)
+            GLib.idle_add(lambda: (self.toggle(), False)[1])
 
-    @Slot(str)
     def _handle_ipc(self, command: str) -> None:
         if command in {"toggle", "toggle-capture"}:
             self.toggle()
         elif command == "settings":
             self.open_settings()
         elif command == "activate":
-            self.tray.showMessage("XGC2 STT", "客户端已在状态栏运行", QSystemTrayIcon.MessageIcon.Information, 2500)
+            _notify("XGC2 STT", "客户端已在状态栏运行")
 
     def _sync_tray(self) -> None:
         label, tooltip, enabled = {
@@ -873,10 +699,10 @@ class ClientController(QObject):
             "recording": ("停止录音", "XGC2 STT · 录音中", True),
             "finalizing": ("正在收尾", "XGC2 STT · 收尾", False),
         }[self.state]
-        self.capture_action.setText(label)
-        self.capture_action.setEnabled(enabled)
-        self.settings_action.setEnabled(self.state == "idle")
-        self.tray.setToolTip(tooltip)
+        self.capture_item.set_label(label)
+        self.capture_item.set_sensitive(enabled)
+        self.settings_item.set_sensitive(self.state == "idle")
+        self.indicator.set_title(tooltip)
 
     def _start_hotkey(self) -> None:
         if self.hotkeys is not None:
@@ -884,50 +710,23 @@ class ClientController(QObject):
             self.hotkeys = None
             self._hotkey_binding = None
         try:
-            self.hotkeys = create_hotkey_listener(self.settings.hotkey, self.toggle_requested.emit)
+            self.hotkeys = create_hotkey_listener(self.settings.hotkey, lambda: _ui(self.toggle))
             self.hotkeys.start()
-            self._hotkey_binding = _parse_hotkey(self.settings.hotkey)
+            self._hotkey_binding = parse_hotkey(self.settings.hotkey)
         except Exception as exc:
             self.hotkeys = None
             self._hotkey_binding = None
+            message = str(exc)
             if is_wayland_session():
-                message = (
-                    f"全局快捷键不可用: {exc}。请使用状态栏菜单，"
-                    "或把系统快捷键绑定到 xgc2-stt-client --toggle-capture。"
-                )
-                QTimer.singleShot(
-                    0,
-                    lambda: self.tray.showMessage(
-                        "XGC2 STT", message, QSystemTrayIcon.MessageIcon.Information, 6000
-                    ),
-                )
+                GLib.idle_add(lambda: (_notify("XGC2 STT", message), False)[1])
                 return
-            message = f"快捷键不可用: {exc}"
-            QTimer.singleShot(0, lambda: self._show_error(message))
+            GLib.idle_add(lambda: (self._show_error(message), False)[1])
 
     def _replace_hotkey(self, specification: str) -> None:
-        binding = _parse_hotkey(specification)
+        binding = parse_hotkey(specification)
         if self.hotkeys is not None and binding == self._hotkey_binding:
             return
-        if is_wayland_session():
-            previous = self.hotkeys
-            try:
-                candidate = create_hotkey_listener(specification, self.toggle_requested.emit)
-                candidate.start()
-            except Exception:
-                if previous is not None:
-                    with suppress(Exception):
-                        previous.stop()
-                self.hotkeys = None
-                self._hotkey_binding = None
-                return
-            self.hotkeys = candidate
-            self._hotkey_binding = binding
-            if previous is not None:
-                with suppress(Exception):
-                    previous.stop()
-            return
-        candidate = create_hotkey_listener(specification, self.toggle_requested.emit)
+        candidate = create_hotkey_listener(specification, lambda: _ui(self.toggle))
         candidate.start()
         previous = self.hotkeys
         previous_binding = self._hotkey_binding
@@ -942,7 +741,6 @@ class ClientController(QObject):
             self._hotkey_binding = previous_binding
             raise
 
-    @Slot()
     def toggle(self) -> None:
         if self.state == "idle":
             self.start_recording()
@@ -960,22 +758,23 @@ class ClientController(QObject):
         self.overlay.set_state("连接中", "#d7ae66")
         self.injector.begin(self.settings.paste_shortcut)
         self.overlay.show_bottom_center()
-        worker = StreamingWorker(self.settings)
+        worker = StreamingWorker(
+            self.settings,
+            on_connected=self._start_audio,
+            on_hypothesis=self._inject_hypothesis,
+            on_state=lambda state: self.overlay.set_state(state, "#d7ae66"),
+            on_segment=self._commit_segment,
+            on_failed=self._stream_failed,
+            on_completed=self._stream_completed,
+        )
         self.worker = worker
-        worker.signals.connected.connect(self._start_audio)
-        worker.signals.hypothesis.connect(self._inject_hypothesis)
-        worker.signals.segment_completed.connect(self._commit_segment)
-        worker.signals.state.connect(lambda state: self.overlay.set_state(state, "#d7ae66"))
-        worker.signals.failed.connect(self._stream_failed)
-        worker.signals.completed.connect(self._stream_completed)
         worker.start()
 
-    @Slot()
     def _start_audio(self) -> None:
         if self.worker is None:
             return
         try:
-            self.capture = AudioCapture(self.worker.feed, self.audio_failed.emit)
+            self.capture = AudioCapture(self.worker.feed, lambda message: _ui(self._stream_failed, message))
             self.capture.start()
         except Exception as exc:
             self.worker.cancel()
@@ -992,15 +791,16 @@ class ClientController(QObject):
         self.state = "finalizing"
         self._sync_tray()
         self.overlay.set_state("收尾", "#d7ae66")
-        self.worker.commit() if self.worker is not None else self._finish_session()
+        if self.worker is not None:
+            self.worker.commit()
+        else:
+            self._finish_session()
 
-    @Slot(str, str, str)
     def _inject_hypothesis(self, text: str, stable: str, unstable: str) -> None:
         self.overlay.set_preview(stable, unstable, text)
         if text and not self.injector.stage(text):
             self.overlay.set_state("焦点已变", "#d7ae66")
 
-    @Slot(str)
     def _commit_segment(self, reason: str) -> None:
         auto_enter = should_auto_enter(self.settings.auto_enter, reason)
         try:
@@ -1015,11 +815,9 @@ class ClientController(QObject):
             self.overlay.set_state("已复制，请按 Ctrl+V", "#d7ae66")
         self.overlay.set_preview("", "", "")
 
-    @Slot()
     def _stream_completed(self) -> None:
         self._finish_session()
 
-    @Slot(str)
     def _stream_failed(self, message: str) -> None:
         self._finish_session()
         self._show_error(message)
@@ -1036,44 +834,65 @@ class ClientController(QObject):
         self.overlay.hide()
         self._sync_tray()
 
-    @Slot()
     def open_settings(self) -> None:
         if self.state != "idle":
             return
         dialog = SettingsDialog(self.settings)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        candidate = dialog.values()
         try:
-            streaming_url(candidate)
-            self._replace_hotkey(candidate.hotkey)
-        except Exception as exc:
-            QMessageBox.critical(self.overlay, "设置无效", str(exc))
-            return
-        previous = self.settings
-        self.settings = candidate
-        try:
-            save_desktop_settings(candidate)
-            set_autostart(candidate.start_at_login, packaged_client_command())
-        except Exception as exc:
-            self.settings = previous
-            with suppress(Exception):
-                self._replace_hotkey(previous.hotkey)
-            QMessageBox.critical(self.overlay, "设置保存失败", str(exc))
+            if dialog.run() != Gtk.ResponseType.OK:
+                return
+            candidate = dialog.values()
+            try:
+                streaming_url(candidate)
+                parse_hotkey(candidate.hotkey)
+            except Exception as exc:
+                self._show_error_dialog("设置无效", str(exc))
+                return
+            try:
+                self._replace_hotkey(candidate.hotkey)
+            except Exception as exc:
+                if not is_wayland_session():
+                    self._show_error_dialog("设置无效", str(exc))
+                    return
+                self.hotkeys = None
+                self._hotkey_binding = None
+            previous = self.settings
+            self.settings = candidate
+            try:
+                save_desktop_settings(candidate)
+                set_autostart(candidate.start_at_login, packaged_client_command())
+            except Exception as exc:
+                self.settings = previous
+                with suppress(Exception):
+                    self._replace_hotkey(previous.hotkey)
+                self._show_error_dialog("设置保存失败", str(exc))
+        finally:
+            dialog.destroy()
+
+    def _show_error_dialog(self, title: str, message: str) -> None:
+        alert = Gtk.MessageDialog(
+            transient_for=None,
+            modal=True,
+            message_type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.OK,
+            text=title,
+        )
+        alert.format_secondary_text(message)
+        alert.run()
+        alert.destroy()
 
     def _show_error(self, message: str) -> None:
         self.overlay.set_state("错误", "#df8589")
-        self.tray.setToolTip("XGC2 STT · 错误")
-        self.tray.showMessage("XGC2 STT", message, QSystemTrayIcon.MessageIcon.Critical, 5000)
-        QTimer.singleShot(2500, self._restore_idle_status)
+        self.indicator.set_title("XGC2 STT · 错误")
+        _notify("XGC2 STT", message, "dialog-error")
+        GLib.timeout_add(2500, self._restore_idle_status)
 
-    @Slot()
-    def _restore_idle_status(self) -> None:
+    def _restore_idle_status(self) -> bool:
         if self.state == "idle":
             self.overlay.set_state("待机", "#79b88c")
             self._sync_tray()
+        return False
 
-    @Slot()
     def shutdown(self) -> None:
         if self._shutting_down:
             return
@@ -1083,24 +902,43 @@ class ClientController(QObject):
         if self.worker is not None:
             self.worker.cancel()
         if self.hotkeys is not None:
-            self.hotkeys.stop()
+            with suppress(Exception):
+                self.hotkeys.stop()
         if getattr(self, "_ipc", None) is not None:
             self._ipc.stop()
         self.injector.end()
-        self.tray.hide()
+        self.overlay.hide()
         self.application.quit()
 
 
+class SttApplication(Gtk.Application):
+    def __init__(self, *, start_capture: bool = False, open_settings: bool = False):
+        Gtk.Application.__init__(
+            self,
+            application_id="io.xgc2.stt-client",
+            flags=Gio.ApplicationFlags.FLAGS_NONE,
+        )
+        self._start_capture = start_capture
+        self._open_settings = open_settings
+        self.controller: ClientController | None = None
+
+    def do_activate(self) -> None:  # noqa: N802
+        if self.controller is None:
+            self.hold()
+            self.controller = ClientController(
+                self,
+                start_capture=self._start_capture,
+                open_settings=self._open_settings,
+            )
+
+
 def run_desktop(*, start_capture: bool = False, open_settings: bool = False) -> int:
-    apply_qt_platform()
-    application = QApplication([sys.argv[0]])
-    application.setApplicationName("XGC2 STT Client")
-    application.setApplicationVersion(__version__)
-    application.setQuitOnLastWindowClosed(False)
-    controller = ClientController(
-        application,
-        start_capture=start_capture,
-        open_settings=open_settings,
-    )
-    application.aboutToQuit.connect(controller.shutdown)
-    return application.exec()
+    GLib.set_prgname(CLIENT_BINARY)
+    application = SttApplication(start_capture=start_capture, open_settings=open_settings)
+
+    def _shutdown(*_args: object) -> None:
+        if application.controller is not None:
+            application.controller.shutdown()
+
+    application.connect("shutdown", _shutdown)
+    return application.run([sys.argv[0]])

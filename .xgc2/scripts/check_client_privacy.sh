@@ -39,7 +39,6 @@ case "${mode}" in
     scan_text "${repo_root}/THIRD_PARTY_NOTICES.md"
     scan_text "${repo_root}/.xgc2/desktop"
     scan_text "${repo_root}/.xgc2/product.yml"
-    scan_text "${repo_root}/.xgc2/desktop.lock"
     scan_text "${repo_root}/.github/workflows/client-deb.yml"
     scan_text "${repo_root}/.github/workflows/client-deb-ci.yml"
     for source_file in "${repo_root}"/.xgc2/scripts/*; do

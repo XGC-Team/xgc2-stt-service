@@ -6,7 +6,6 @@ repo_root="$(cd "${script_dir}/../.." && pwd)"
 architecture="${TARGET_ARCH:-$(dpkg --print-architecture)}"
 distribution="${PACKAGE_DISTRIBUTION:-focal}"
 output_dir="${OUTPUT_DIR:-${repo_root}/debs}"
-cache_dir="${XGC2_CLIENT_BUILD_CACHE_DIR:-${repo_root}/.ci/client-build-cache}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -24,11 +23,8 @@ case "${distribution}" in
   *) echo "Supported distributions: focal, jammy, noble." >&2; exit 2 ;;
 esac
 command -v docker >/dev/null
-uv_binary="$(command -v uv)"
 mkdir -p "${output_dir}"
 output_dir="$(cd "${output_dir}" && pwd -P)"
-mkdir -p "${cache_dir}"
-cache_dir="$(cd "${cache_dir}" && pwd -P)"
 source_date_epoch="$(git -C "${repo_root}" show -s --format=%ct HEAD)"
 network_args=()
 if [[ -n "${DOCKER_NETWORK:-}" ]]; then
@@ -45,18 +41,15 @@ docker run --rm --platform "${platform}" "${network_args[@]}" \
   -e PACKAGE_DISTRIBUTION="${distribution}" \
   -e TARGET_ARCH="${architecture}" \
   -e OUTPUT_DIR=/out \
-  -e PYTHON_STANDALONE_CACHE_DIR=/cache \
   -e SOURCE_DATE_EPOCH="${source_date_epoch}" \
   -e HOST_UID="$(id -u)" \
   -e HOST_GID="$(id -g)" \
   -e APT_MIRROR="${apt_mirror}" \
   -v "${repo_root}:/workspace:ro" \
   -v "${output_dir}:/out" \
-  -v "${cache_dir}:/cache" \
-  -v "${uv_binary}:/usr/local/bin/uv:ro" \
   "${ubuntu_image}" bash -lc '
     set -euo pipefail
-    restore_host_ownership() { chown -R "${HOST_UID}:${HOST_GID}" /cache /out || true; }
+    restore_host_ownership() { chown -R "${HOST_UID}:${HOST_GID}" /out || true; }
     trap restore_host_ownership EXIT
     if [[ -n "${APT_MIRROR}" ]]; then
       mirror="${APT_MIRROR%/}"
@@ -68,6 +61,6 @@ docker run --rm --platform "${platform}" "${network_args[@]}" \
       fi
     fi
     apt-get -o Acquire::Retries=5 update >/dev/null
-    apt-get install -y --no-install-recommends binutils build-essential ca-certificates clang curl dpkg-dev python3 ripgrep >/dev/null
+    apt-get install -y --no-install-recommends ca-certificates dpkg-dev python3 >/dev/null
     /workspace/.xgc2/scripts/build_client_deb.sh
   '

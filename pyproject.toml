@@ -29,8 +29,8 @@ dev = [
   "ruff>=0.13,<0.14",
 ]
 desktop = [
-  "PySide6_Essentials==6.7.3",
-  "pynput>=1.7.7,<1.9",
+  "python-xlib>=0.33,<1",
+  "websocket-client>=1.6,<2",
   "sounddevice==0.5.5",
 ]
 
@@ -50,3 +50,6 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/xgc2_stt/desktop.py" = ["E402"]

@@ -17,11 +17,39 @@ from tempfile import NamedTemporaryFile
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from xgc2_stt import __version__
-
 DEFAULT_HOTKEY = "<f9>"
 CLIENT_BINARY = "xgc2-stt-client"
+CLIENT_VERSION = "0.2.0"
 IPC_SOCKET_NAME = "xgc2-stt-client.sock"
+
+_MODIFIER_ALIASES = {
+    "alt": "alt",
+    "alt_l": "alt",
+    "alt_r": "alt",
+    "cmd": "super",
+    "cmd_l": "super",
+    "cmd_r": "super",
+    "control": "ctrl",
+    "ctrl": "ctrl",
+    "ctrl_l": "ctrl",
+    "ctrl_r": "ctrl",
+    "shift": "shift",
+    "shift_l": "shift",
+    "shift_r": "shift",
+    "super": "super",
+    "win": "super",
+    "meta": "super",
+}
+_KEY_ALIASES = {
+    "backspace": "BackSpace",
+    "enter": "Return",
+    "esc": "Escape",
+    "escape": "Escape",
+    "return": "Return",
+    "space": "space",
+    "spacebar": "space",
+    "tab": "Tab",
+}
 
 
 @dataclass(frozen=True)
@@ -117,11 +145,41 @@ def streaming_headers(settings: DesktopSettings) -> dict[str, str]:
     return {"Authorization": f"Bearer {settings.api_key}"}
 
 
+def parse_hotkey(specification: str) -> tuple[str, frozenset[str]]:
+    """Parse `<f9>` / `<ctrl>+<shift>+r` into an X11 keysym name and modifiers."""
+    raw = specification.strip()
+    if not raw:
+        raise ValueError("快捷键不能为空")
+    modifiers: set[str] = set()
+    keys: list[str] = []
+    for part in raw.split("+"):
+        token = part.strip().lower()
+        if len(token) >= 3 and token.startswith("<") and token.endswith(">"):
+            token = token[1:-1]
+        if not token:
+            raise ValueError("快捷键格式无效")
+        if token in _MODIFIER_ALIASES:
+            modifiers.add(_MODIFIER_ALIASES[token])
+            continue
+        keys.append(token)
+    if len(keys) != 1:
+        raise ValueError("快捷键必须包含且只能包含一个非修饰键")
+    key = keys[0]
+    if key.startswith("f") and key[1:].isdigit():
+        keysym_name = f"F{int(key[1:])}"
+    elif key in _KEY_ALIASES:
+        keysym_name = _KEY_ALIASES[key]
+    elif len(key) == 1:
+        keysym_name = key
+    else:
+        keysym_name = key
+    return keysym_name, frozenset(modifiers)
+
+
 def replacement_plan(previous: str, current: str) -> tuple[int, str]:
     common = 0
-    for before, after in zip(previous, current, strict=False):
-        if before != after:
-            break
+    limit = min(len(previous), len(current))
+    while common < limit and previous[common] == current[common]:
         common += 1
     return len(previous) - common, current[common:]
 
@@ -144,16 +202,6 @@ def desktop_session_type() -> str:
 
 def is_wayland_session() -> bool:
     return desktop_session_type() == "wayland"
-
-
-def apply_qt_platform() -> None:
-    """Prefer native Wayland, then X11/XWayland. Honour an explicit override."""
-    if os.environ.get("QT_QPA_PLATFORM"):
-        return
-    if is_wayland_session():
-        os.environ["QT_QPA_PLATFORM"] = "wayland;xcb"
-    elif os.environ.get("DISPLAY"):
-        os.environ["QT_QPA_PLATFORM"] = "xcb"
 
 
 def packaged_client_command() -> list[str]:
@@ -232,7 +280,7 @@ def parse_desktop_cli(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def format_desktop_version() -> str:
-    return f"{CLIENT_BINARY} {__version__}"
+    return f"{CLIENT_BINARY} {CLIENT_VERSION}"
 
 
 def ipc_socket_path() -> Path:
@@ -292,10 +340,10 @@ class DesktopIpcListener:
         while not self._stop.is_set():
             try:
                 conn, _unused = self._sock.accept()
-            except TimeoutError:
-                continue
             except OSError:
-                break
+                if self._stop.is_set() or self._sock is None:
+                    break
+                continue
             with conn:
                 try:
                     payload = conn.recv(256).decode("utf-8", errors="replace").strip()

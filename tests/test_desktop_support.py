@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 import sys
 from pathlib import Path
@@ -11,6 +10,7 @@ import pytest
 from xgc2_stt.desktop_support import (
     DesktopSettings,
     load_desktop_settings,
+    parse_hotkey,
     replacement_plan,
     save_desktop_settings,
     should_auto_enter,
@@ -123,15 +123,18 @@ def test_cli_help_exits_zero() -> None:
     assert caught.value.code == 0
 
 
+def test_parse_hotkey_accepts_function_and_chord_specs() -> None:
+    assert parse_hotkey("<f9>") == ("F9", frozenset())
+    assert parse_hotkey("<ctrl>+<shift>+r") == ("r", frozenset({"ctrl", "shift"}))
+    assert parse_hotkey("<alt>+space") == ("space", frozenset({"alt"}))
+
+
 def test_session_type_prefers_xdg(monkeypatch: pytest.MonkeyPatch) -> None:
-    from xgc2_stt.desktop_support import apply_qt_platform, desktop_session_type, is_wayland_session
+    from xgc2_stt.desktop_support import desktop_session_type, is_wayland_session
 
     monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
-    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
     assert desktop_session_type() == "wayland"
     assert is_wayland_session() is True
-    apply_qt_platform()
-    assert os.environ["QT_QPA_PLATFORM"] == "wayland;xcb"
 
 
 def test_insert_uses_xdotool_on_x11() -> None:
