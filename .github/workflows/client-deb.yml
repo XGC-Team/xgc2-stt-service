@@ -93,9 +93,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Run desktop source tests

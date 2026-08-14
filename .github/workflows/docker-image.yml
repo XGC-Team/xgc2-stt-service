@@ -30,9 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -68,9 +65,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
       packages: read
