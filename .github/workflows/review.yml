@@ -18,7 +18,8 @@ jobs:
       image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
-
+      - name: Use image toolchains
+        run: echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Source, WebUI, and shell checks
         run: |
           uv sync --frozen --extra dev --extra desktop
