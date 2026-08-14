@@ -330,10 +330,7 @@ class AudioCapture:
 
 def _sounddevice_read(stream: Any, frames: int) -> bytes:
     result = stream.read(frames)
-    if isinstance(result, tuple):
-        data = result[0]
-    else:
-        data = result
+    data = result[0] if isinstance(result, tuple) else result
     return bytes(data)
 
 
@@ -357,7 +354,10 @@ def _sounddevice_input_devices(backend: Any) -> list[Any]:
     if default not in (None, -1) and default not in candidates:
         candidates.append(default)
     for index, info in enumerate(listing):
-        channels = info.get("max_input_channels", 0) if isinstance(info, dict) else getattr(info, "max_input_channels", 0)
+        if isinstance(info, dict):
+            channels = info.get("max_input_channels", 0)
+        else:
+            channels = getattr(info, "max_input_channels", 0)
         if channels and index not in candidates:
             candidates.append(index)
     return candidates
