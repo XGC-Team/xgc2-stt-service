@@ -58,6 +58,8 @@ fi
 grep -Fq 'python3-gi' .xgc2/scripts/build_client_deb.sh
 grep -Fq 'python3-pyaudio' .xgc2/scripts/build_client_deb.sh
 grep -Fq 'needs: [release-guard, source-tests]' .github/workflows/client-deb.yml
+grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0' .github/workflows/client-deb.yml
+grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0' .github/workflows/client-deb-ci.yml
 grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0' .github/workflows/client-deb.yml
 grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0' .github/workflows/client-deb-ci.yml
 if grep -Eq 'run_cpp_quality|run_source_tests|--clobber|gh release upload' \
@@ -71,5 +73,14 @@ if grep -Eq 'astral-sh/setup-uv|actions/setup-node|ubuntu:20\.04|ubuntu:22\.04|u
   exit 1
 fi
 ./.xgc2/scripts/check_client_privacy.sh source
-git diff --check
+git config --global --add safe.directory "${repo_root}"
+if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Workspace is not a Git checkout: ${repo_root}" >&2
+  ls -la "${repo_root}/.git" >&2 || true
+  if [[ -f "${repo_root}/.git" ]]; then
+    cat "${repo_root}/.git" >&2
+  fi
+  exit 1
+fi
+git -C "${repo_root}" diff --check
 echo "Client package compliance passed."

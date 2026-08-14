@@ -25,6 +25,7 @@ jobs:
         run: |
           export PATH="/usr/local/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}"
           export PYTHONPATH="${GITHUB_WORKSPACE}/src${PYTHONPATH:+:${PYTHONPATH}}"
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           ln -sfn /opt/xgc2-stt/web/node_modules web/node_modules
           ruff check src tests scripts/verify-stream.py
           env -u DISPLAY -u WAYLAND_DISPLAY pytest

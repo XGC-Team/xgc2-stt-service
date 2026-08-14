@@ -72,6 +72,7 @@ jobs:
         run: |
           export PATH="/usr/local/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}"
           export PYTHONPATH="${GITHUB_WORKSPACE}/src${PYTHONPATH:+:${PYTHONPATH}}"
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
           ruff check src tests
           pytest
           ./.xgc2/scripts/check_client_package.sh
