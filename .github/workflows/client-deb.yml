@@ -27,22 +27,9 @@ on:
         required: false
         default: ""
         type: string
-      run_cpp_quality:
-        description: Run C++ quality checks
-        required: true
-        default: false
-        type: boolean
-      run_source_tests:
-        description: Run source tests
-        required: true
-        default: false
-        type: boolean
-  push:
-    tags: ["v*"]
-
 permissions:
   actions: read
-  contents: write
+  contents: read
 
 env:
   XGC2_APT_OVERLAY_URL: ${{ inputs.apt_overlay_url }}
@@ -60,6 +47,7 @@ jobs:
       - name: Validate release contract
         id: identity
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
           PREPARE_ACTION: ${{ inputs.prepare_action || 'release' }}
@@ -73,9 +61,6 @@ jobs:
             [[ "$source_sha" == "$EXPECTED_SOURCE_SHA" ]]
             [[ "$version" == "$EXPECTED_VERSION" ]]
             case "$PREPARE_ACTION" in release|compatibility-verify) ;; *) exit 1 ;; esac
-          else
-            [[ "$GITHUB_REF" == refs/tags/v* ]]
-            PREPARE_ACTION=release
           fi
           if [[ -n "${XGC2_DEPENDENCY_SET_DIGEST}" && ! "$XGC2_DEPENDENCY_SET_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
             echo "dependency_set_digest must be empty or 64 lowercase hex characters" >&2
@@ -86,6 +71,14 @@ jobs:
             exit 1
           fi
           ./.xgc2/scripts/check_client_package.sh
+          if [[ "$PREPARE_ACTION" == release ]]; then
+            tag="desktop-v${version}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1 || \
+               gh release view "${tag}" >/dev/null 2>&1; then
+              echo "Release namespace already exists: ${tag}" >&2
+              exit 1
+            fi
+          fi
           {
             echo "version=${version}"
             echo "source_sha=${source_sha}"
@@ -96,15 +89,7 @@ jobs:
             fi
           } >> "$GITHUB_OUTPUT"
 
-  cpp-quality:
-    if: ${{ inputs.run_cpp_quality }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: No C++ sources in the desktop client package
-        run: echo "No standalone C++ quality gate is required."
-
   source-tests:
-    if: ${{ inputs.run_source_tests }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -117,10 +102,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends libportaudio2
           uv sync --frozen --extra dev --extra desktop
           uv run ruff check src tests
-          uv run pytest tests/test_desktop_support.py tests/test_desktop_audio.py
+          uv run pytest
+          ./.xgc2/scripts/check_client_package.sh
 
   build-and-smoke:
-    needs: release-guard
+    needs: [release-guard, source-tests]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -232,9 +218,6 @@ jobs:
             exit 1
           }
           tag="desktop-v${VERSION}"
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            tag="${GITHUB_REF_NAME}"
-          fi
           notes="$(mktemp)"
           cat >"${notes}" <<EOF
           Desktop client ${VERSION} for Ubuntu 20.04 (focal), 22.04 (jammy), and 24.04 (noble).
@@ -250,14 +233,15 @@ jobs:
           The package does not bundle a service URL or API key.
           Source commit: ${SOURCE_SHA}
           EOF
-          if gh release view "${tag}" >/dev/null 2>&1; then
-            gh release upload "${tag}" "${debs[@]}" --clobber
-          else
-            gh release create "${tag}" "${debs[@]}" \
-              --title "Desktop client ${VERSION}" \
-              --notes-file "${notes}" \
-              --target "${SOURCE_SHA}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1 || \
+             gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Refusing to overwrite existing release namespace: ${tag}" >&2
+            exit 1
           fi
+          gh release create "${tag}" "${debs[@]}" \
+            --title "Desktop client ${VERSION}" \
+            --notes-file "${notes}" \
+            --target "${SOURCE_SHA}"
 
   optional-package-publish:
     if: ${{ needs.release-guard.outputs.publish == 'true' }}

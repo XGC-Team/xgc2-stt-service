@@ -35,7 +35,7 @@ desktop = [
 ]
 
 [project.scripts]
-xgc2-stt-client = "xgc2_stt.desktop_support:run_desktop_cli"
+xgc2-stt-client = "xgc2_stt.desktop_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xgc2_stt"]

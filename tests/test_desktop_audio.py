@@ -5,7 +5,15 @@ from typing import Any
 
 import pytest
 
-import xgc2_stt.desktop as desktop
+import xgc2_stt.desktop_audio as desktop_audio
+
+
+class FakeAudioBackend:
+    class CallbackAbort(Exception):
+        pass
+
+    def __init__(self, factory):
+        self.RawInputStream = factory
 
 
 class FakeRawInputStream:
@@ -36,9 +44,11 @@ def test_audio_capture_streams_mono_pcm16_at_16khz(monkeypatch: pytest.MonkeyPat
         streams.append(stream)
         return stream
 
-    monkeypatch.setattr(desktop.sounddevice, "RawInputStream", open_stream)
     received: list[bytes] = []
-    capture = desktop.AudioCapture(received.append)
+    capture = desktop_audio.AudioCapture(
+        received.append,
+        backend=FakeAudioBackend(open_stream),
+    )
 
     capture.start()
 
@@ -69,8 +79,10 @@ def test_audio_capture_closes_stream_when_start_fails(monkeypatch: pytest.Monkey
             raise OSError("device busy")
 
     stream = FailingRawInputStream()
-    monkeypatch.setattr(desktop.sounddevice, "RawInputStream", lambda **kwargs: _configure(stream, kwargs))
-    capture = desktop.AudioCapture(lambda _pcm: None)
+    capture = desktop_audio.AudioCapture(
+        lambda _pcm: None,
+        backend=FakeAudioBackend(lambda **kwargs: _configure(stream, kwargs)),
+    )
 
     with pytest.raises(RuntimeError, match="无法启动麦克风: device busy"):
         capture.start()
@@ -81,7 +93,6 @@ def test_audio_capture_closes_stream_when_start_fails(monkeypatch: pytest.Monkey
 
 def test_audio_capture_stop_waits_for_inflight_callback(monkeypatch: pytest.MonkeyPatch) -> None:
     stream = FakeRawInputStream()
-    monkeypatch.setattr(desktop.sounddevice, "RawInputStream", lambda **kwargs: _configure(stream, kwargs))
     callback_entered = threading.Event()
     release_callback = threading.Event()
 
@@ -89,7 +100,10 @@ def test_audio_capture_stop_waits_for_inflight_callback(monkeypatch: pytest.Monk
         callback_entered.set()
         assert release_callback.wait(timeout=2)
 
-    capture = desktop.AudioCapture(consume)
+    capture = desktop_audio.AudioCapture(
+        consume,
+        backend=FakeAudioBackend(lambda **kwargs: _configure(stream, kwargs)),
+    )
     capture.start()
     callback_thread = threading.Thread(target=stream.emit, args=(b"\x01\x00",))
     callback_thread.start()
@@ -105,6 +119,25 @@ def test_audio_capture_stop_waits_for_inflight_callback(monkeypatch: pytest.Monk
     stop_thread.join(timeout=1)
     assert stopped.is_set()
     assert stream.closed is True
+
+
+def test_audio_capture_reports_callback_failure_exactly_once() -> None:
+    stream = FakeRawInputStream()
+    failures: list[str] = []
+    capture = desktop_audio.AudioCapture(
+        lambda _pcm: (_ for _ in ()).throw(RuntimeError("consumer failed")),
+        failures.append,
+        backend=FakeAudioBackend(lambda **kwargs: _configure(stream, kwargs)),
+    )
+    capture.start()
+
+    with pytest.raises(FakeAudioBackend.CallbackAbort):
+        stream.emit(b"\x01\x00")
+    assert failures == ["consumer failed"]
+
+    stream.emit(b"\x02\x00")
+    assert failures == ["consumer failed"]
+    capture.close()
 
 
 def _configure(stream: FakeRawInputStream, options: dict[str, Any]) -> FakeRawInputStream:

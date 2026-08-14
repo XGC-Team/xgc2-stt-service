@@ -22,6 +22,8 @@ required=(
   .xgc2/scripts/smoke_client_deb.sh
   .xgc2/scripts/xgc2_artifact_manifest.py
   .xgc2/scripts/publish_client_apt.py
+  src/xgc2_stt/desktop_audio.py
+  src/xgc2_stt/desktop_cli.py
   .github/workflows/client-deb.yml
   .github/workflows/client-deb-ci.yml
 )
@@ -52,6 +54,14 @@ grep -Fq 'Exec=xgc2-stt-client' .xgc2/desktop/xgc2-stt-client.desktop
 grep -Fq '<binary>xgc2-stt-client</binary>' .xgc2/desktop/io.xgc2.stt-client.metainfo.xml
 grep -Fq '"libQt6OpenGL.so.6"' .xgc2/desktop/xgc2-stt-client.spec
 grep -Fq '"libQt6WlShellIntegration.so.6"' .xgc2/desktop/xgc2-stt-client.spec
+grep -Fq 'xgc2-stt-client = "xgc2_stt.desktop_cli:main"' pyproject.toml
+grep -Fq 'from xgc2_stt.desktop_cli import main' .xgc2/desktop/launcher.py
+grep -Fq 'needs: [release-guard, source-tests]' .github/workflows/client-deb.yml
+if grep -Eq 'run_cpp_quality|run_source_tests|--clobber|gh release upload' \
+  .github/workflows/client-deb.yml; then
+  echo "Desktop release workflow contains a bypass or overwrite path." >&2
+  exit 1
+fi
 ./.xgc2/scripts/check_client_privacy.sh source
 python3 -m py_compile .xgc2/scripts/publish_client_apt.py
 git diff --check

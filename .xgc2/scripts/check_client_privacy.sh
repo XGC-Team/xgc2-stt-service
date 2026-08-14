@@ -11,15 +11,29 @@ mode="${1:-source}"
 forbidden_regex='xiaokang\.ink|10\.10\.10\.[0-9]+|(:|%3A)(34896|34897)([^0-9]|$)|crpi-[[:alnum:]]+\.'
 scan_text() {
   local target="$1"
-  if LC_ALL=C rg -a -n -i "${forbidden_regex}" "${target}"; then
-    echo "Private or deployment-specific endpoint data found in ${target}." >&2
-    return 1
-  fi
+  local status
+  set +e
+  LC_ALL=C rg -a -q -i "${forbidden_regex}" "${target}"
+  status=$?
+  set -e
+  case "${status}" in
+    0)
+      echo "Private or deployment-specific endpoint data found in ${target}." >&2
+      return 1
+      ;;
+    1) return 0 ;;
+    *)
+      echo "Privacy scan failed for ${target} (rg exit ${status})." >&2
+      return "${status}"
+      ;;
+  esac
 }
 
 case "${mode}" in
   source)
     scan_text "${repo_root}/src/xgc2_stt/desktop.py"
+    scan_text "${repo_root}/src/xgc2_stt/desktop_audio.py"
+    scan_text "${repo_root}/src/xgc2_stt/desktop_cli.py"
     scan_text "${repo_root}/src/xgc2_stt/desktop_support.py"
     scan_text "${repo_root}/README.md"
     scan_text "${repo_root}/THIRD_PARTY_NOTICES.md"
@@ -57,6 +71,8 @@ PY
     extracted="$(mktemp -d)"
     trap 'rm -rf -- "${extracted}"' EXIT
     dpkg-deb --extract "${deb}" "${extracted}"
+    install -d "${extracted}/DEBIAN"
+    dpkg-deb --control "${deb}" "${extracted}/DEBIAN"
     scan_text "${extracted}"
     ;;
   *) echo "usage: check_client_privacy.sh [source|deb PACKAGE.deb]" >&2; exit 2 ;;

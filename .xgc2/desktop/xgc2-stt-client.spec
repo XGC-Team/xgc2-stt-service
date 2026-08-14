@@ -44,6 +44,7 @@ analysis = Analysis(
     binaries=plugin_binaries + qt_lib_binaries,
     datas=[],
     hiddenimports=[
+        "sounddevice",
         "pynput.keyboard._xorg",
         "pynput.mouse._xorg",
         "pynput.keyboard._uinput",

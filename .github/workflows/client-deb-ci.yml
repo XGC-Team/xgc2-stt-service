@@ -16,9 +16,13 @@ on:
       - "uv.lock"
       - "src/xgc2_stt/__init__.py"
       - "src/xgc2_stt/desktop.py"
+      - "src/xgc2_stt/desktop_audio.py"
+      - "src/xgc2_stt/desktop_cli.py"
       - "src/xgc2_stt/desktop_support.py"
       - "tests/test_desktop_support.py"
       - "tests/test_desktop_audio.py"
+      - "tests/test_desktop_cli.py"
+      - "tests/test_client_privacy_gate.py"
   pull_request:
     branches: [main]
     paths:
@@ -34,9 +38,13 @@ on:
       - "uv.lock"
       - "src/xgc2_stt/__init__.py"
       - "src/xgc2_stt/desktop.py"
+      - "src/xgc2_stt/desktop_audio.py"
+      - "src/xgc2_stt/desktop_cli.py"
       - "src/xgc2_stt/desktop_support.py"
       - "tests/test_desktop_support.py"
       - "tests/test_desktop_audio.py"
+      - "tests/test_desktop_cli.py"
+      - "tests/test_client_privacy_gate.py"
   workflow_dispatch:
 
 permissions:
@@ -47,14 +55,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  package-compliance:
+  source-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Check package contract
-        run: ./.xgc2/scripts/check_client_package.sh
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: Run mandatory source and package gates
+        run: |
+          uv sync --frozen --extra dev --extra desktop
+          uv run ruff check src tests
+          uv run pytest
+          ./.xgc2/scripts/check_client_package.sh
 
   build-and-smoke:
+    needs: source-tests
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false

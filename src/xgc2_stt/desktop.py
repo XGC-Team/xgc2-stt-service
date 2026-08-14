@@ -4,12 +4,10 @@ import json
 import queue
 import sys
 import threading
-from array import array
 from contextlib import suppress
 from html import escape
 from typing import Any
 
-import sounddevice
 from pynput.keyboard import GlobalHotKeys, HotKey, Key, KeyCode
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QCursor, QMouseEvent, QTextCursor
@@ -39,19 +37,17 @@ from websockets.sync.client import connect
 from Xlib import XK, X, display, error
 
 from . import __version__
+from .desktop_audio import AudioCapture
 from .desktop_support import (
     DesktopIpcListener,
     DesktopSettings,
     InsertionOutcome,
     apply_qt_platform,
-    format_desktop_version,
     insert_finalized_text,
     is_wayland_session,
     load_desktop_settings,
     packaged_client_command,
-    parse_desktop_cli,
     save_desktop_settings,
-    send_running_instance,
     set_autostart,
     should_auto_enter,
     streaming_headers,
@@ -354,83 +350,6 @@ class StreamingWorker:
         finally:
             if final_received:
                 self.signals.completed.emit()
-
-
-class AudioCapture(QObject):
-    failed = Signal(str)
-
-    def __init__(self, on_pcm: Any, parent: QObject | None = None):
-        super().__init__(parent)
-        self.on_pcm = on_pcm
-        self.stream: sounddevice.RawInputStream | None = None
-        self._lifecycle_lock = threading.Lock()
-        self._callback_lock = threading.Lock()
-        self._accepting_audio = threading.Event()
-        self._failure_reported = threading.Event()
-
-    def start(self) -> None:
-        with self._lifecycle_lock:
-            if self.stream is not None:
-                raise RuntimeError("麦克风已经启动")
-            stream: sounddevice.RawInputStream | None = None
-            try:
-                stream = sounddevice.RawInputStream(
-                    samplerate=16000,
-                    blocksize=0,
-                    channels=1,
-                    dtype="int16",
-                    callback=self._read,
-                )
-                self.stream = stream
-                self._failure_reported.clear()
-                self._accepting_audio.set()
-                stream.start()
-            except Exception as exc:
-                self._accepting_audio.clear()
-                self.stream = None
-                if stream is not None:
-                    with suppress(Exception):
-                        stream.close()
-                raise RuntimeError(f"无法启动麦克风: {exc}") from exc
-
-    def _read(self, indata: Any, _frames: int, _time: Any, _status: Any) -> None:
-        try:
-            with self._callback_lock:
-                if not self._accepting_audio.is_set():
-                    return
-                pcm = bytes(indata)
-                if sys.byteorder != "little":
-                    samples = array("h")
-                    samples.frombytes(pcm)
-                    samples.byteswap()
-                    pcm = samples.tobytes()
-                if pcm:
-                    self.on_pcm(pcm)
-        except Exception as exc:
-            self._accepting_audio.clear()
-            if not self._failure_reported.is_set():
-                self._failure_reported.set()
-                self.failed.emit(str(exc))
-            raise sounddevice.CallbackAbort from exc
-
-    def stop(self) -> None:
-        with self._lifecycle_lock:
-            self._accepting_audio.clear()
-            stream = self.stream
-            self.stream = None
-            if stream is not None:
-                with suppress(Exception):
-                    stream.stop()
-                with suppress(Exception):
-                    stream.close()
-            # A callback that passed the active check before stop() must finish
-            # before this method returns. A queued callback sees the cleared
-            # event and cannot send audio into the next recognition session.
-            with self._callback_lock:
-                pass
-
-    def close(self) -> None:
-        self.stop()
 
 
 class FocusTracker:
@@ -892,6 +811,7 @@ class Overlay(QWidget):
 class ClientController(QObject):
     toggle_requested = Signal()
     ipc_requested = Signal(str)
+    audio_failed = Signal(str)
 
     def __init__(self, application: QApplication, *, start_capture: bool = False, open_settings: bool = False):
         super().__init__()
@@ -904,6 +824,7 @@ class ClientController(QObject):
         self.overlay = Overlay()
         self.toggle_requested.connect(self.toggle)
         self.ipc_requested.connect(self._handle_ipc)
+        self.audio_failed.connect(self._stream_failed)
         self.hotkeys: ExclusiveX11HotKey | GlobalHotKeys | None = None
         self._hotkey_binding: tuple[int, frozenset[str]] | None = None
         self._shutting_down = False
@@ -1054,8 +975,7 @@ class ClientController(QObject):
         if self.worker is None:
             return
         try:
-            self.capture = AudioCapture(self.worker.feed, self)
-            self.capture.failed.connect(self._stream_failed)
+            self.capture = AudioCapture(self.worker.feed, self.audio_failed.emit)
             self.capture.start()
         except Exception as exc:
             self.worker.cancel()
@@ -1171,17 +1091,7 @@ class ClientController(QObject):
         self.application.quit()
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_desktop_cli(sys.argv[1:] if argv is None else argv)
-    if args.version:
-        sys.stdout.write(f"{format_desktop_version()}\n")
-        return 0
-    if args.toggle_capture and send_running_instance("toggle"):
-        return 0
-    if args.settings and send_running_instance("settings"):
-        return 0
-    if not args.toggle_capture and not args.settings and send_running_instance("activate"):
-        return 0
+def run_desktop(*, start_capture: bool = False, open_settings: bool = False) -> int:
     apply_qt_platform()
     application = QApplication([sys.argv[0]])
     application.setApplicationName("XGC2 STT Client")
@@ -1189,12 +1099,8 @@ def main(argv: list[str] | None = None) -> int:
     application.setQuitOnLastWindowClosed(False)
     controller = ClientController(
         application,
-        start_capture=args.toggle_capture,
-        open_settings=args.settings,
+        start_capture=start_capture,
+        open_settings=open_settings,
     )
     application.aboutToQuit.connect(controller.shutdown)
     return application.exec()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

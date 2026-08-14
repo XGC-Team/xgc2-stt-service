@@ -9,7 +9,7 @@ architecture="${TARGET_ARCH:-$(dpkg --print-architecture)}"
 package_name=xgc2-stt-client
 maintainer='XGC2 Packaging <lxk36@users.noreply.github.com>'
 
-for command_name in curl dpkg-deb readelf sha256sum tar uv; do
+for command_name in curl dpkg-deb readelf rg sha256sum tar uv; do
   command -v "${command_name}" >/dev/null 2>&1 || {
     echo "Required build command is unavailable: ${command_name}" >&2
     exit 1
@@ -198,8 +198,12 @@ forbidden="$(find "${dist_root}" \
 
 archive_listing="$("${build_venv}/bin/pyi-archive_viewer" -r -b \
   "${dist_root}/xgc2-stt-client")"
-if printf '%s\n' "${archive_listing}" | grep -Eq \
-  '(^|[./[:space:]])(_dbm|dbm|_tkinter|tkinter)([./[:space:]]|$)'; then
+if ! grep -Eq '(^|[./[:space:]])sounddevice([./[:space:]]|$)' <<<"${archive_listing}"; then
+  echo "Frozen client archive is missing the lazy-loaded sounddevice module." >&2
+  exit 1
+fi
+if grep -Eq '(^|[./[:space:]])(_dbm|dbm|_tkinter|tkinter)([./[:space:]]|$)' \
+  <<<"${archive_listing}"; then
   echo "Excluded DBM or Tkinter module found in the PyInstaller archive." >&2
   exit 1
 fi

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,15 @@ def test_autostart_is_written_and_removed(tmp_path: Path, monkeypatch: pytest.Mo
     assert not target.exists()
 
 
+def test_source_autostart_fallback_uses_headless_safe_entrypoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from xgc2_stt.desktop_support import packaged_client_command
+
+    monkeypatch.setattr("xgc2_stt.desktop_support.shutil.which", lambda _name: None)
+    assert packaged_client_command() == [sys.executable, "-m", "xgc2_stt.desktop_cli"]
+
+
 def test_cli_version_and_toggle_flags() -> None:
     from xgc2_stt.desktop_support import format_desktop_version, parse_desktop_cli
 
@@ -103,17 +113,6 @@ def test_cli_version_and_toggle_flags() -> None:
     assert toggle.toggle_capture is True
     settings = parse_desktop_cli(["--settings"])
     assert settings.settings is True
-
-
-def test_version_cli_does_not_import_tray_backends(capsys: pytest.CaptureFixture[str]) -> None:
-    import sys
-
-    sys.modules.pop("xgc2_stt.desktop", None)
-    from xgc2_stt.desktop_support import run_desktop_cli
-
-    assert run_desktop_cli(["--version"]) == 0
-    assert capsys.readouterr().out.startswith("xgc2-stt-client ")
-    assert "xgc2_stt.desktop" not in sys.modules
 
 
 def test_cli_help_exits_zero() -> None:
