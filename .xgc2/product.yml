@@ -34,7 +34,7 @@ ownership:
   - /usr/share/applications/xgc2-stt-client.desktop
   - /usr/share/metainfo/io.xgc2.stt-client.metainfo.xml
 release:
-  repository: lxk36/xgc2-stt-service
+  repository: XGC-Team/xgc2-stt-service
   ref: main
   workflow: client-deb.yml
   ci_workflow: client-deb-ci.yml

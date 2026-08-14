@@ -18,7 +18,7 @@ LABEL org.opencontainers.image.title="XGC2 STT Base" \
       org.opencontainers.image.description="Native realtime GPU speech-to-text runtime for XGC2" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.licenses="MIT AND Apache-2.0" \
-      org.opencontainers.image.source="https://github.com/lxk36/xgc2-stt-service" \
+      org.opencontainers.image.source="https://github.com/XGC-Team/xgc2-stt-service" \
       io.xgc2.stt.variant="base" \
       io.xgc2.stt.weights="external"
 
@@ -76,7 +76,7 @@ LABEL org.opencontainers.image.title="XGC2 STT Qwen Base" \
       org.opencontainers.image.description="Official revision-capable Qwen streaming runtime for XGC2" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.licenses="MIT AND Apache-2.0" \
-      org.opencontainers.image.source="https://github.com/lxk36/xgc2-stt-service" \
+      org.opencontainers.image.source="https://github.com/XGC-Team/xgc2-stt-service" \
       io.xgc2.stt.variant="qwen-base" \
       io.xgc2.stt.weights="external"
 
