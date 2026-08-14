@@ -24,6 +24,14 @@ the client API behind an HTTPS/WSS reverse proxy before allowing remote use.
 
 ## Images
 
+The service Dockerfile starts from XGC-built images in `xgc2-images`.
+`xgc2-stt-dev` already contains the WebUI toolchain and test extras.
+`xgc2-stt-runtime` already contains vLLM, sox, tini, qwen-asr, and the
+frozen service Python set. This repository does not `FROM` stock
+`node` / `vllm` images and does not `apt-get` / `uv sync` / `npm ci` in CI.
+If a new dependency is required, add it in `xgc2-images` and rebuild that
+image.
+
 The following self-contained images share the same API:
 
 | Tag | Embedded model | Streaming mode |

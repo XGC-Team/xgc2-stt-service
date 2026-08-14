@@ -29,5 +29,4 @@ grep -Pq '[\x{4e00}-\x{9fff}]' <<<"${response}"
 ffmpeg -hide_banner -loglevel error -y \
   -i "${tmp_dir}/asr-zh.wav" \
   -ac 1 -ar 16000 -f s16le "${tmp_dir}/asr-zh.pcm"
-uv run --frozen --python 3.12 --extra dev \
-  python scripts/verify-stream.py "${base}" "${tmp_dir}/asr-zh.pcm"
+python3 scripts/verify-stream.py "${base}" "${tmp_dir}/asr-zh.pcm"

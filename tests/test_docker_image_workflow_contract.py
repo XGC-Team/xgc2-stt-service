@@ -31,7 +31,10 @@ def test_main_pushes_run_checks_without_entering_publish_jobs() -> None:
     assert "tags:" not in trigger
     assert "expected_version:" in trigger
     assert "expected_source_sha:" in trigger
-    assert "env -u DISPLAY -u WAYLAND_DISPLAY uv run pytest" in jobs["checks"]
+    assert "env -u DISPLAY -u WAYLAND_DISPLAY pytest" in jobs["checks"]
+    assert "uv sync" not in jobs["checks"]
+    assert "npm ci" not in jobs["checks"]
+    assert "xgc2-stt-dev:1.0.0" in jobs["checks"]
     assert "if:" not in jobs["checks"]
     assert "github.event_name == 'workflow_dispatch'" in jobs["release-guard"]
     assert "github.event_name == 'workflow_dispatch'" in jobs["build"]
@@ -108,6 +111,22 @@ def test_service_version_and_runtime_image_references_stay_aligned() -> None:
     assert f"APP_VERSION: ${{STT_VERSION:-{version}}}" in (ROOT / "docker-compose.build.yml").read_text(
         encoding="utf-8"
     )
+
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    from_images = re.findall(r"(?im)^FROM\s+(\S+)", dockerfile)
+    assert from_images
+    assert all(
+        image == "base"
+        or image.startswith("${STT_")
+        or image.startswith("ghcr.io/xgc-team/xgc2-images/")
+        for image in from_images
+    )
+    assert "node:" not in dockerfile
+    assert "vllm/vllm-openai" not in dockerfile
+    assert "apt-get install" not in dockerfile
+    assert "npm ci" not in dockerfile
+    assert "uv pip install" not in dockerfile
+    assert "pip install --no-cache-dir --no-deps ." in dockerfile
 
     immutable_ref = f"ghcr.io/xgc-team/xgc2-stt-service:qwen-{version}"
     assert immutable_ref in (ROOT / ".env.example").read_text(encoding="utf-8")

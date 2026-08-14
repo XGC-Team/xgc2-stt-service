@@ -5,7 +5,7 @@ weights:
 
 | Component | Pinned source | License |
 | --- | --- | --- |
-| vLLM | `vllm/vllm-openai:v0.14.0` (`sha256:1d6866b8...`) | Apache-2.0 |
+| vLLM | `ghcr.io/xgc-team/xgc2-images/xgc2-stt-runtime:1.0.0` wraps `vllm/vllm-openai:v0.14.0` (`sha256:1d6866b8...`) | Apache-2.0 |
 | Qwen3-ASR-1.7B | `Qwen/Qwen3-ASR-1.7B@7278e1e70fe206f11671096ffdd38061171dd6e5` | Apache-2.0 |
 | XGC2 UI React | release package `v0.3.0` | See the package release |
 
