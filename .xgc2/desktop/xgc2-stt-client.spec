@@ -20,14 +20,28 @@ required_plugins = {
     "wayland-graphics-integration-client/libqt-plugin-wayland-egl.so",
     "wayland-decoration-client/libbradient.so",
 }
+# Wayland EGL plugins DT_NEEDED libQt6OpenGL.so.6; libwl-shell-plugin.so
+# DT_NEEDED libQt6WlShellIntegration.so.6. Collect them explicitly so the
+# tray runtime is complete even if PyInstaller does not follow plugin
+# dependencies into the Qt allowlist below.
+required_qt_shared_libraries = {
+    "libQt6OpenGL.so.6",
+    "libQt6WlShellIntegration.so.6",
+}
 plugin_binaries = [
     (str(pyside_root / "Qt" / "plugins" / relative), f"PySide6/Qt/plugins/{Path(relative).parent}")
     for relative in sorted(required_plugins)
 ]
+qt_lib_binaries = []
+for name in sorted(required_qt_shared_libraries):
+    source = pyside_root / "Qt" / "lib" / name
+    if not source.is_file():
+        raise SystemExit(f"Pinned PySide6 wheel is missing {source}")
+    qt_lib_binaries.append((str(source), "PySide6/Qt/lib"))
 analysis = Analysis(
     [str(repo_root / ".xgc2" / "desktop" / "launcher.py")],
     pathex=[str(repo_root / "src")],
-    binaries=plugin_binaries,
+    binaries=plugin_binaries + qt_lib_binaries,
     datas=[],
     hiddenimports=[
         "pynput.keyboard._xorg",
@@ -61,8 +75,9 @@ analysis = Analysis(
 analysis.exclude_system_libraries()
 
 # Keep an auditable Qt allowlist. Include Wayland client libraries so the tray
-# can use the native compositor; drop compositor/server, VNC, eglfs and
-# multimedia plugins that this client does not use.
+# can use the native compositor, plus Qt OpenGL for the Wayland EGL plugin.
+# Drop compositor/server, VNC, eglfs and multimedia plugins that this client
+# does not use.
 allowed_qt_libraries = {
     "libQt6Core.so.6",
     "libQt6DBus.so.6",
@@ -74,7 +89,7 @@ allowed_qt_libraries = {
     "libicudata.so.73",
     "libicui18n.so.73",
     "libicuuc.so.73",
-}
+} | required_qt_shared_libraries
 filtered_binaries = []
 for entry in analysis.binaries:
     destination = entry[0].replace("\\", "/")

@@ -49,6 +49,8 @@ grep -Eq '^PYTHON_STANDALONE_COMMIT=[0-9a-f]{40}$' .xgc2/desktop.lock
 [[ "$(grep -Ec '^PYTHON_STANDALONE_(SOURCE|AMD64|ARM64)_SHA256=[0-9a-f]{64}$' .xgc2/desktop.lock)" == 3 ]]
 grep -Fq 'Exec=xgc2-stt-client' .xgc2/desktop/xgc2-stt-client.desktop
 grep -Fq '<binary>xgc2-stt-client</binary>' .xgc2/desktop/io.xgc2.stt-client.metainfo.xml
+grep -Fq '"libQt6OpenGL.so.6"' .xgc2/desktop/xgc2-stt-client.spec
+grep -Fq '"libQt6WlShellIntegration.so.6"' .xgc2/desktop/xgc2-stt-client.spec
 ./.xgc2/scripts/check_client_privacy.sh source
 git diff --check
 echo "Client package compliance passed."

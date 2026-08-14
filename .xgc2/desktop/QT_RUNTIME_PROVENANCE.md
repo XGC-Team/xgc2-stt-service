@@ -27,8 +27,9 @@ texts and attribution manifests, and ICU's `LICENSE` plus `license.html` from
 those immutable source snapshots. The build copies this material unchanged to
 `/usr/share/doc/xgc2-stt-client/qt-runtime/`.
 
-The packaged client also ships the Wayland platform plugin and
-`Qt6WaylandClient` libraries from the same `PySide6_Essentials 6.7.3` wheel so
+The packaged client also ships the Wayland platform plugins,
+`Qt6WaylandClient`, `Qt6OpenGL` (required by `libqwayland-egl.so`), and
+`Qt6WlShellIntegration` from the same `PySide6_Essentials 6.7.3` wheel so
 the tray UI can run on X11 and Wayland. Those libraries remain LGPL-3.0-only /
 GPL-3.0-only as part of Qt for Python; compositor/server plugins are not
 included.

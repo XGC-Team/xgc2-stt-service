@@ -18,12 +18,20 @@ grep -F './usr/share/applications/xgc2-stt-client.desktop' "${contents}" >/dev/n
 grep -F './usr/share/metainfo/io.xgc2.stt-client.metainfo.xml' "${contents}" >/dev/null
 dpkg-deb --extract "${deb}" "${extract_root}"
 binary="${extract_root}/opt/xgc2-stt-client/xgc2-stt-client"
-wayland_plugin="${extract_root}/opt/xgc2-stt-client/_internal/PySide6/Qt/plugins/platforms/libqwayland-generic.so"
-[[ -f "${wayland_plugin}" ]] || wayland_plugin="$(find "${extract_root}/opt/xgc2-stt-client" -name 'libqwayland-generic.so' -print -quit)"
-[[ -n "${wayland_plugin}" && -f "${wayland_plugin}" ]] || {
-  echo "Client package is missing the Qt Wayland platform plugin." >&2
-  exit 1
+require_runtime_file() {
+  local name="$1"
+  local description="$2"
+  local candidate
+  candidate="$(find "${extract_root}/opt/xgc2-stt-client" -name "${name}" -print -quit)"
+  [[ -n "${candidate}" && -f "${candidate}" ]] || {
+    echo "Client package is missing ${description}: ${name}" >&2
+    exit 1
+  }
 }
+require_runtime_file libqwayland-generic.so "the Qt Wayland platform plugin"
+require_runtime_file libqwayland-egl.so "the Qt Wayland EGL platform plugin"
+require_runtime_file libQt6OpenGL.so.6 "Qt OpenGL (required by libqwayland-egl.so)"
+require_runtime_file libQt6WlShellIntegration.so.6 "Qt wl_shell integration"
 docs_root="${extract_root}/usr/share/doc/${package}"
 provenance_root="${docs_root}/python-build-standalone"
 qt_provenance_root="${docs_root}/qt-runtime"
