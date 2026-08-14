@@ -230,7 +230,9 @@ jobs:
           xgc2-stt-client
           \`\`\`
 
-          The package does not bundle a service URL or API key.
+          This leaf workflow publishes GitHub Release assets only. APT
+          promotion is owned by the central release train. The package does
+          not bundle a service URL or API key.
           Source commit: ${SOURCE_SHA}
           EOF
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1 || \
@@ -242,35 +244,3 @@ jobs:
             --title "Desktop client ${VERSION}" \
             --notes-file "${notes}" \
             --target "${SOURCE_SHA}"
-
-  optional-package-publish:
-    if: ${{ needs.release-guard.outputs.publish == 'true' }}
-    needs: [release-guard, build-and-smoke, publish-github-release]
-    runs-on: ubuntu-latest
-    env:
-      APT_REPO_HOST: ${{ secrets.APT_REPO_HOST }}
-      APT_REPO_PORT: ${{ secrets.APT_REPO_PORT }}
-      APT_REPO_USER: ${{ secrets.APT_REPO_USER }}
-      APT_REPO_SSH_KEY: ${{ secrets.APT_REPO_SSH_KEY }}
-      APT_REPO_KNOWN_HOSTS: ${{ secrets.APT_REPO_KNOWN_HOSTS }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: xgc2-stt-client-*-release-input
-          path: dist
-          merge-multiple: true
-      - name: Optional trusted publish
-        env:
-          VERSION: ${{ needs.release-guard.outputs.version }}
-          SOURCE_SHA: ${{ needs.release-guard.outputs.source_sha }}
-        run: |
-          set -euo pipefail
-          python3 .xgc2/scripts/publish_client_apt.py \
-            --artifact-dir dist \
-            --work-dir "${RUNNER_TEMP}/stt-publish" \
-            --version "${VERSION}" \
-            --source-sha "${SOURCE_SHA}" \
-            --run-id "${GITHUB_RUN_ID}" \
-            --workflow "${GITHUB_WORKFLOW}" \
-            --workflow-ref "${GITHUB_WORKFLOW_REF}"

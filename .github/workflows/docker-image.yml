@@ -3,104 +3,42 @@ name: Docker images
 on:
   push:
     branches: [main]
-    tags: ["v*"]
-    paths-ignore:
-      - ".xgc2/**"
-      - ".github/workflows/client-deb-ci.yml"
-      - ".github/workflows/client-deb.yml"
-      - ".github/workflows/review.yml"
-      - ".gitignore"
-      - "src/xgc2_stt/desktop.py"
-      - "src/xgc2_stt/desktop_audio.py"
-      - "src/xgc2_stt/desktop_cli.py"
-      - "src/xgc2_stt/desktop_support.py"
-      - "tests/test_desktop_support.py"
-      - "tests/test_desktop_audio.py"
-      - "tests/test_desktop_cli.py"
-      - "tests/test_client_privacy_gate.py"
-      - "README.md"
-      - "THIRD_PARTY_NOTICES.md"
   workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Expected service version from pyproject.toml
+        required: true
+        type: string
+      expected_source_sha:
+        description: Expected 40-character source commit SHA
+        required: true
+        type: string
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
-  group: stt-images-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type == 'branch' }}
+  group: stt-images-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  VERSION: 0.1.0
   IMAGE: ghcr.io/xgc-team/xgc2-stt-service
 
 jobs:
-  verify-registries:
-    name: Verify registries
-    runs-on: ubuntu-latest
-    env:
-      EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
-      EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
-      EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
-      EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
-    outputs:
-      extra: ${{ steps.probe.outputs.extra }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: probe
-        name: Resolve extra registry
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/ci-registry-roots.sh
-          source scripts/ci-registry-roots.sh
-          present=0
-          for key in EXTRA_REGISTRY EXTRA_USERNAME EXTRA_PASSWORD; do
-            [ -n "${!key:-}" ] && present=$((present + 1))
-          done
-          if [ "${present}" -eq 3 ] && [ -n "${EXTRA_NAMESPACE:-}" ]; then
-            echo "extra=1" >> "${GITHUB_OUTPUT}"
-          elif [ "${present}" -eq 0 ]; then
-            echo "extra=0" >> "${GITHUB_OUTPUT}"
-          else
-            echo "extra registry is partially configured" >&2
-            exit 1
-          fi
-      - uses: docker/login-action@v3
-        if: steps.probe.outputs.extra == '1'
-        with:
-          registry: ${{ env.EXTRA_REGISTRY }}
-          username: ${{ env.EXTRA_USERNAME }}
-          password: ${{ env.EXTRA_PASSWORD }}
-      - name: Probe extra registry
-        if: steps.probe.outputs.extra == '1'
-        run: |
-          set -euo pipefail
-          # docker login already completed the Bearer token dance. Harbor-style
-          # registries still return 401 for Basic on /v2/; treat that as reachable.
-          code="$(curl -sS -o /dev/null -w '%{http_code}' \
-            -u "${EXTRA_USERNAME}:${EXTRA_PASSWORD}" "https://${EXTRA_REGISTRY}/v2/" || true)"
-          case "${code}" in
-            200|401) echo "extra registry /v2/ returned ${code}" ;;
-            *) echo "extra registry /v2/ returned ${code}" >&2; exit 1 ;;
-          esac
-
   checks:
     name: Source checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           python-version: "3.12"
           enable-cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
@@ -119,134 +57,272 @@ jobs:
           STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
           bash -n scripts/*.sh
 
-  base:
-    name: Build common base
-    needs: [checks, verify-registries]
+  release-guard:
+    name: Validate immutable release
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: checks
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      source_sha: ${{ steps.identity.outputs.source_sha }}
+      tag: ${{ steps.identity.outputs.tag }}
+      mirror_enabled: ${{ steps.registries.outputs.mirror_enabled }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Free runner space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
-      - name: Build and push common base
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          target: base
-          build-args: APP_VERSION=${{ env.VERSION }}
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:base-${{ env.VERSION }}
-            ${{ env.IMAGE }}:base
-            ${{ env.IMAGE }}:base-sha-${{ github.sha }}
-          cache-from: type=registry,ref=${{ env.IMAGE }}:base-${{ env.VERSION }}
-          cache-to: type=inline
-          provenance: mode=max
-          sbom: true
-
-  variants:
-    name: Build ${{ matrix.variant }}
-    needs: [base, verify-registries]
-    runs-on: ubuntu-latest
-    timeout-minutes: 240
-    strategy:
-      fail-fast: false
-      matrix:
-        variant: [qwen]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Free runner space
-        run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Resolve image tags
-        id: tags
+      - name: Validate requested source identity
+        id: identity
         env:
-          VARIANT: ${{ matrix.variant }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+        shell: bash
         run: |
+          set -euo pipefail
+          version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          source_sha="$(git rev-parse HEAD)"
+
+          [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]] || {
+            echo "Image publication requires workflow_dispatch" >&2
+            exit 1
+          }
+          [[ "${GITHUB_REF}" == refs/heads/main ]] || {
+            echo "Image publication requires ref main" >&2
+            exit 1
+          }
+          [[ "${EXPECTED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "expected_source_sha must be 40 lowercase hexadecimal characters" >&2
+            exit 1
+          }
+          [[ "${source_sha}" == "${GITHUB_SHA}" && "${source_sha}" == "${EXPECTED_SOURCE_SHA}" ]] || {
+            echo "Checked-out, event, and expected source SHAs must match" >&2
+            exit 1
+          }
+
+          remote_result="$(GIT_ASKPASS=/bin/false GIT_TERMINAL_PROMPT=0 \
+            git -c credential.helper= ls-remote --exit-code \
+              "https://github.com/${GITHUB_REPOSITORY}.git" refs/heads/main)"
+          [[ "${remote_result}" =~ ^([0-9a-f]{40})[[:space:]]+refs/heads/main$ ]] || {
+            echo "Remote main did not resolve to one exact commit" >&2
+            exit 1
+          }
+          remote_main="${BASH_REMATCH[1]}"
+          [[ "${remote_main}" == "${source_sha}" ]] || {
+            echo "Remote main advanced after dispatch; refusing to publish a stale source SHA" >&2
+            exit 1
+          }
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "pyproject.toml project.version must be an X.Y.Z image version" >&2
+            exit 1
+          }
+          [[ "${version}" == "${EXPECTED_VERSION}" ]] || {
+            echo "expected_version must match pyproject.toml project.version" >&2
+            exit 1
+          }
+
           {
-            echo 'value<<EOF'
-            echo "${IMAGE}:${VARIANT}-${VERSION}"
-            echo "${IMAGE}:${VARIANT}"
-            echo "${IMAGE}:${VARIANT}-sha-${GITHUB_SHA}"
-            if [ "${VARIANT}" = qwen ]; then
-              echo "${IMAGE}:latest"
-            fi
-            echo 'EOF'
+            echo "version=${version}"
+            echo "source_sha=${source_sha}"
+            echo "tag=qwen-${version}"
           } >> "${GITHUB_OUTPUT}"
 
-      - name: Build and push embedded ${{ matrix.variant }} variant
-        uses: docker/build-push-action@v6
+      - name: Reject existing release tags
+        id: registries
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.identity.outputs.tag }}
+          EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
+          EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
+          EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
+          EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y --no-install-recommends jq skopeo >/dev/null
+
+          authdir="$(mktemp -d)"
+          trap 'rm -rf "${authdir}"' EXIT
+          authfile="${authdir}/auth.json"
+          [[ -n "${GHCR_TOKEN}" ]]
+          printf '%s' "${GHCR_TOKEN}" | skopeo login --authfile "${authfile}" \
+            --username "${GITHUB_ACTOR}" --password-stdin ghcr.io >/dev/null
+
+          ghcr_tags="${authdir}/ghcr-tags.json"
+          skopeo list-tags --authfile "${authfile}" "docker://${IMAGE}" > "${ghcr_tags}"
+          jq -e '.Tags | type == "array"' "${ghcr_tags}" >/dev/null
+          if jq -e --arg tag "${RELEASE_TAG}" '.Tags | index($tag) != null' "${ghcr_tags}" >/dev/null; then
+            echo "GHCR release tag ${RELEASE_TAG} already exists; immutable tags are never reused" >&2
+            exit 1
+          fi
+
+          values=(EXTRA_REGISTRY EXTRA_USERNAME EXTRA_PASSWORD)
+          present=0
+          for name in "${values[@]}"; do
+            [[ -n "${!name:-}" ]] && present=$((present + 1))
+          done
+          if [[ "${present}" -eq 0 && -z "${EXTRA_NAMESPACE:-}" ]]; then
+            echo "mirror_enabled=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          [[ "${present}" -eq 3 && -n "${EXTRA_NAMESPACE:-}" ]] || {
+            echo "Extra registry mirror is partially configured" >&2
+            exit 1
+          }
+
+          registry="${EXTRA_REGISTRY#https://}"
+          registry="${registry#http://}"
+          registry="${registry%/}"
+          namespace="${EXTRA_NAMESPACE#/}"
+          namespace="${namespace%/}"
+          [[ "${registry}" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?$ ]] || {
+            echo "Extra registry must be a lowercase registry host with an optional port" >&2
+            exit 1
+          }
+          [[ "${namespace}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$ ]] || {
+            echo "Extra registry namespace is invalid" >&2
+            exit 1
+          }
+          target="${registry}/${namespace}/xgc2-stt-service"
+          printf '%s' "${EXTRA_PASSWORD}" | skopeo login --authfile "${authfile}" \
+            --username "${EXTRA_USERNAME}" --password-stdin "${registry}" >/dev/null
+
+          mirror_tags="${authdir}/mirror-tags.json"
+          # A missing repository, authentication error, or network error is not
+          # distinguishable from a safe empty namespace here, so all are fatal.
+          skopeo list-tags --authfile "${authfile}" "docker://${target}" > "${mirror_tags}"
+          jq -e '.Tags | type == "array"' "${mirror_tags}" >/dev/null
+          if jq -e --arg tag "${RELEASE_TAG}" '.Tags | index($tag) != null' "${mirror_tags}" >/dev/null; then
+            echo "Extra mirror release tag ${RELEASE_TAG} already exists; immutable tags are never reused" >&2
+            exit 1
+          fi
+          echo "mirror_enabled=true" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build and publish immutable Qwen image
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.release-guard.result == 'success' }}
+    needs: release-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ needs.release-guard.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Free runner space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish Qwen image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
-          target: ${{ matrix.variant }}
-          build-args: APP_VERSION=${{ env.VERSION }}
+          target: qwen
+          platforms: linux/amd64
+          build-args: APP_VERSION=${{ needs.release-guard.outputs.version }}
           push: true
-          tags: ${{ steps.tags.outputs.value }}
-          cache-from: |
-            type=registry,ref=${{ env.IMAGE }}:base-${{ env.VERSION }}
-            type=registry,ref=${{ env.IMAGE }}:${{ matrix.variant }}-${{ env.VERSION }}
-          cache-to: type=inline
+          tags: ${{ env.IMAGE }}:${{ needs.release-guard.outputs.tag }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.release-guard.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.release-guard.outputs.source_sha }}
           provenance: mode=max
           sbom: true
 
+      - name: Validate published digest
+        env:
+          BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${BUILD_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+
   mirror:
-    name: Mirror release tags
-    needs: [verify-registries, base, variants]
-    if: needs.verify-registries.outputs.extra == '1'
+    name: Mirror immutable Qwen image
+    if: ${{ needs.release-guard.outputs.mirror_enabled == 'true' }}
+    needs: [release-guard, build]
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    permissions:
+      contents: read
+      packages: read
     env:
       EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
       EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
       EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
       EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.EXTRA_REGISTRY }}
-          username: ${{ env.EXTRA_USERNAME }}
-          password: ${{ env.EXTRA_PASSWORD }}
-      - name: Mirror runnable images
+      - name: Mirror exact release digest
+        env:
+          BUILD_DIGEST: ${{ needs.build.outputs.digest }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.release-guard.outputs.tag }}
+          SOURCE_SHA: ${{ needs.release-guard.outputs.source_sha }}
         shell: bash
         run: |
           set -euo pipefail
-          # shellcheck source=scripts/ci-registry-roots.sh
-          source scripts/ci-registry-roots.sh
+          [[ "${BUILD_DIGEST}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          values=(EXTRA_REGISTRY EXTRA_USERNAME EXTRA_PASSWORD)
+          for name in "${values[@]}"; do [[ -n "${!name:-}" ]]; done
+
+          registry="${EXTRA_REGISTRY#https://}"
+          registry="${registry#http://}"
+          registry="${registry%/}"
+          namespace="${EXTRA_NAMESPACE#/}"
+          namespace="${namespace%/}"
+          [[ "${registry}" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?$ ]]
+          [[ "${namespace}" =~ ^[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*$ ]]
+          target="${registry}/${namespace}/xgc2-stt-service"
+
           sudo apt-get update >/dev/null
-          sudo apt-get install -y --no-install-recommends skopeo >/dev/null
-          target="${EXTRA_ROOT}/xgc2-stt-service"
-          tags=(base base-${VERSION} qwen qwen-${VERSION} latest)
-          for tag in "${tags[@]}"; do
-            skopeo copy --override-os linux --override-arch amd64 \
-              --authfile "${HOME}/.docker/config.json" \
-              "docker://${IMAGE}:${tag}" "docker://${target}:${tag}"
-          done
+          sudo apt-get install -y --no-install-recommends jq skopeo >/dev/null
+          authdir="$(mktemp -d)"
+          trap 'rm -rf "${authdir}"' EXIT
+          authfile="${authdir}/auth.json"
+          printf '%s' "${GHCR_TOKEN}" | skopeo login --authfile "${authfile}" \
+            --username "${GITHUB_ACTOR}" --password-stdin ghcr.io >/dev/null
+          printf '%s' "${EXTRA_PASSWORD}" | skopeo login --authfile "${authfile}" \
+            --username "${EXTRA_USERNAME}" --password-stdin "${registry}" >/dev/null
+
+          mirror_tags="${authdir}/mirror-tags.json"
+          skopeo list-tags --authfile "${authfile}" "docker://${target}" > "${mirror_tags}"
+          jq -e '.Tags | type == "array"' "${mirror_tags}" >/dev/null
+          if jq -e --arg tag "${RELEASE_TAG}" '.Tags | index($tag) != null' "${mirror_tags}" >/dev/null; then
+            echo "Extra mirror release tag ${RELEASE_TAG} appeared after validation; refusing to overwrite" >&2
+            exit 1
+          fi
+
+          source="docker://${IMAGE}@${BUILD_DIGEST}"
+          destination="docker://${target}:${RELEASE_TAG}"
+          source_revision="$(skopeo inspect --override-os linux --override-arch amd64 \
+            --authfile "${authfile}" --format '{{ index .Labels "org.opencontainers.image.revision" }}' "${source}")"
+          [[ "${source_revision}" == "${SOURCE_SHA}" ]]
+          skopeo copy --override-os linux --override-arch amd64 \
+            --authfile "${authfile}" "${source}" "${destination}"
+
+          source_digest="$(skopeo inspect --override-os linux --override-arch amd64 \
+            --authfile "${authfile}" --format '{{.Digest}}' "${source}")"
+          destination_digest="$(skopeo inspect --override-os linux --override-arch amd64 \
+            --authfile "${authfile}" --format '{{.Digest}}' "${destination}")"
+          [[ "${source_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "${destination_digest}" == "${source_digest}" ]]

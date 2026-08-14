@@ -21,7 +21,6 @@ required=(
   .xgc2/scripts/physical_client_x11.py
   .xgc2/scripts/smoke_client_deb.sh
   .xgc2/scripts/xgc2_artifact_manifest.py
-  .xgc2/scripts/publish_client_apt.py
   src/xgc2_stt/desktop_audio.py
   src/xgc2_stt/desktop_cli.py
   .github/workflows/client-deb.yml
@@ -63,6 +62,5 @@ if grep -Eq 'run_cpp_quality|run_source_tests|--clobber|gh release upload' \
   exit 1
 fi
 ./.xgc2/scripts/check_client_privacy.sh source
-python3 -m py_compile .xgc2/scripts/publish_client_apt.py
 git diff --check
 echo "Client package compliance passed."

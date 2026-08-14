@@ -28,9 +28,13 @@ The following self-contained images share the same API:
 
 | Tag | Embedded model | Streaming mode |
 | --- | --- | --- |
-| `base-0.1.0` | none | Qwen CUDA/vLLM/API/WebUI runtime |
 | `qwen-0.1.0` | Qwen3-ASR-1.7B | Revision-capable chunked recognition |
-| `latest` | Qwen3-ASR-1.7B | Current default release |
+
+`qwen-0.1.0` is a frozen historical image reference and is not republished.
+The image workflow now accepts publication only through an explicit dispatch
+for the exact current `main` commit and a previously unused `qwen-X.Y.Z` tag.
+It never publishes moving `base`, `qwen`, `latest`, or SHA aliases. A new image
+therefore requires a new service version and creates exactly one immutable tag.
 
 Images are published to:
 
@@ -258,12 +262,15 @@ multimedia runtimes:
 .xgc2/scripts/physical_client_x11.py /opt/xgc2-stt-client/xgc2-stt-client
 ```
 
-CI builds separate Ubuntu 20.04, 22.04, and 24.04 `.deb` files and publishes
-them to GitHub Releases (`desktop-v*` or the `v*` tag). The image workflow
-publishes versioned `base` and `qwen` images to
-`ghcr.io/xgc-team/xgc2-stt-service`, and tags `latest` to the Qwen release.
-Optional mirrors are controlled only by repository secrets. It does not deploy
-a hosted service.
+CI builds separate Ubuntu 20.04, 22.04, and 24.04 `.deb` files. This leaf
+workflow creates GitHub Release assets only; APT publication belongs to the
+central release train. A desktop release can only be dispatched for the exact
+current `main` commit and creates a new `desktop-vX.Y.Z-N` namespace; existing
+tags, releases, and assets are never overwritten. The image workflow runs
+source checks for every `main` push, while image publication requires a
+separate exact-SHA dispatch and a new single `qwen-X.Y.Z` tag. Optional mirrors
+copy that exact image digest and may not replace an existing tag. The workflows
+do not deploy a hosted service.
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for model and runtime
 licenses and pinned-source information.
