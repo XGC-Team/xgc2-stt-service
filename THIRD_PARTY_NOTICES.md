@@ -26,6 +26,7 @@ the repository MIT license.
 | Ayatana AppIndicator or AppIndicator3 | Ubuntu `gir1.2-ayatanaappindicator3-0.1` or `gir1.2-appindicator3-0.1` | GPL-3.0-or-later / LGPL-2.1-or-later |
 | websocket-client | Ubuntu `python3-websocket` | Apache-2.0 |
 | PyAudio / PortAudio | Ubuntu `python3-pyaudio` | MIT |
+| python-sounddevice / PortAudio | Ubuntu `python3-sounddevice` (22.04+, optional) | MIT |
 | python-xlib | Ubuntu `python3-xlib` | LGPL-2.1-or-later |
 
 Debian systems also provide the GNU license texts under

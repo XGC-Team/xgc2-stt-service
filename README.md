@@ -169,10 +169,14 @@ There is no APT repository.
 
 ```bash
 # Example: Ubuntu 22.04 amd64. Use ubuntu-20.04 or ubuntu-24.04 as needed.
-sudo dpkg -i xgc2-stt-client_0.2.0-1_amd64.ubuntu-22.04.deb
-sudo apt-get install -f
+sudo apt install ./xgc2-stt-client_0.2.1-2_amd64.ubuntu-22.04.deb
 xgc2-stt-client
 ```
+
+`apt install ./…deb` resolves `Depends` (`python3-websocket`, `python3-pyaudio`,
+`python3-xlib`, GTK). `python3-sounddevice` is recommended on Ubuntu 22.04+ only.
+`dpkg -i` alone will leave the package unconfigured; if
+you already did that, run `sudo apt-get install -f`.
 
 CI also uploads the same artifacts from the Desktop client Deb workflows.
 For source development:

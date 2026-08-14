@@ -19,7 +19,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 DEFAULT_HOTKEY = "<f9>"
 CLIENT_BINARY = "xgc2-stt-client"
-CLIENT_VERSION = "0.2.0"
+CLIENT_VERSION = "0.2.1"
 IPC_SOCKET_NAME = "xgc2-stt-client.sock"
 
 _MODIFIER_ALIASES = {

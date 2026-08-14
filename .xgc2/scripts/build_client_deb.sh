@@ -89,7 +89,7 @@ Architecture: ${architecture}
 Installed-Size: ${installed_size}
 Maintainer: ${maintainer}
 Depends: python3 (>= 3.8), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, python3-websocket, python3-pyaudio, python3-xlib
-Recommends: gir1.2-notify-0.7, wl-clipboard, xclip, xdotool
+Recommends: gir1.2-notify-0.7, python3-sounddevice, wl-clipboard, xclip, xdotool
 Suggests: wtype, ydotool
 Description: Desktop client for a self-hosted streaming STT API
  Provides a status-area client with microphone capture, a configurable
