@@ -21,6 +21,7 @@ required=(
   .xgc2/scripts/physical_client_x11.py
   .xgc2/scripts/smoke_client_deb.sh
   .xgc2/scripts/xgc2_artifact_manifest.py
+  .xgc2/scripts/publish_client_apt.py
   .github/workflows/client-deb.yml
   .github/workflows/client-deb-ci.yml
 )
@@ -52,5 +53,6 @@ grep -Fq '<binary>xgc2-stt-client</binary>' .xgc2/desktop/io.xgc2.stt-client.met
 grep -Fq '"libQt6OpenGL.so.6"' .xgc2/desktop/xgc2-stt-client.spec
 grep -Fq '"libQt6WlShellIntegration.so.6"' .xgc2/desktop/xgc2-stt-client.spec
 ./.xgc2/scripts/check_client_privacy.sh source
+python3 -m py_compile .xgc2/scripts/publish_client_apt.py
 git diff --check
 echo "Client package compliance passed."

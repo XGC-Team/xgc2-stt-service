@@ -1,9 +1,9 @@
 # XGC2 STT
 
 Self-hosted, GPU-accelerated streaming speech recognition with a management
-WebUI, an HTTP/WebSocket API, and a native Linux desktop client. Release images
-contain the selected model weights, so a deployment does not download models
-at first start.
+WebUI demo, an HTTP/WebSocket API, and a native Linux desktop client. Release
+images contain the selected model weights, so a deployment does not download
+models at first start.
 
 This repository publishes software, not a public speech-recognition service.
 It does not include a hosted endpoint, operator address, API key, or private
@@ -14,7 +14,7 @@ organization and enter its URL and key during initial setup.
 
 | Component | Purpose |
 | --- | --- |
-| GPU service | Model runtime, local management WebUI, API-key administration |
+| GPU service | Model runtime, local management WebUI demo, API-key administration |
 | API gateway | HTTP and WebSocket speech-recognition endpoints without the management UI |
 | Desktop client | Tray application for X11 and Wayland, global shortcut or CLI toggle, preview and text insertion |
 
@@ -95,12 +95,19 @@ profiles are not intended for an 8 GB GPU without separate tuning.
 
 ![STT management WebUI](docs/assets/webui-management.png)
 
-Open the management URL configured in `.env`. The UI provides:
+The GPU service serves an in-process **demo / operator panel** on the management
+URL configured in `.env`. It is not a separately packaged web client. The UI
+provides:
 
 - model readiness and cached NVML GPU history;
 - API-key creation, rotation, revocation and per-key usage;
-- microphone-based streaming recognition;
+- microphone-based streaming recognition against the API origin you configure;
 - runtime settings and explicit restart boundaries.
+
+Reusable capture, transcript, and connection chrome for product embedding lives
+in [`@xgc2/ui-react`](https://github.com/XGC-Team/xgc2-ui) (`SpeechClientWorkspace`
+and related components). This service consumes that package; later product
+frontends should embed the same shared UI rather than copying this demo.
 
 Generated API-key secrets are returned once. Only SHA-256 digests are stored
 in the persistent data volume. NVML is sampled by the server; browsers read

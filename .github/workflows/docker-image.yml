@@ -31,6 +31,53 @@ env:
   IMAGE: ghcr.io/xgc-team/xgc2-stt-service
 
 jobs:
+  verify-registries:
+    name: Verify registries
+    runs-on: ubuntu-latest
+    env:
+      EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
+      EXTRA_NAMESPACE: ${{ secrets.EXTRA_NAMESPACE }}
+      EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
+      EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
+    outputs:
+      extra: ${{ steps.probe.outputs.extra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: probe
+        name: Resolve extra registry
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/ci-registry-roots.sh
+          source scripts/ci-registry-roots.sh
+          present=0
+          for key in EXTRA_REGISTRY EXTRA_NAMESPACE EXTRA_USERNAME EXTRA_PASSWORD; do
+            [ -n "${!key:-}" ] && present=$((present + 1))
+          done
+          if [ "${present}" -eq 4 ]; then
+            echo "extra=1" >> "${GITHUB_OUTPUT}"
+          elif [ "${present}" -eq 0 ]; then
+            echo "extra=0" >> "${GITHUB_OUTPUT}"
+          else
+            echo "extra registry is partially configured" >&2
+            exit 1
+          fi
+      - uses: docker/login-action@v3
+        if: steps.probe.outputs.extra == '1'
+        with:
+          registry: ${{ env.EXTRA_REGISTRY }}
+          username: ${{ env.EXTRA_USERNAME }}
+          password: ${{ env.EXTRA_PASSWORD }}
+      - name: Probe extra registry
+        if: steps.probe.outputs.extra == '1'
+        run: |
+          set -euo pipefail
+          curl -fsS -o /dev/null -u "${EXTRA_USERNAME}:${EXTRA_PASSWORD}" "https://${EXTRA_REGISTRY}/v2/"
+
   checks:
     name: Source checks
     runs-on: ubuntu-latest
@@ -72,7 +119,7 @@ jobs:
 
   base:
     name: Build common base
-    needs: checks
+    needs: [checks, verify-registries]
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -109,7 +156,7 @@ jobs:
 
   variants:
     name: Build ${{ matrix.variant }}
-    needs: base
+    needs: [base, verify-registries]
     runs-on: ubuntu-latest
     timeout-minutes: 240
     strategy:
@@ -165,43 +212,38 @@ jobs:
 
   mirror:
     name: Mirror release tags
-    needs: [base, variants]
+    needs: [verify-registries, base, variants]
+    if: needs.verify-registries.outputs.extra == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      XGC_CN_REGISTRY: ${{ secrets.XGC_CN_REGISTRY }}
-      XGC_CN_NAMESPACE: ${{ secrets.XGC_CN_NAMESPACE }}
-      XGC_CN_USERNAME: ${{ secrets.XGC_CN_USERNAME }}
-      XGC_CN_PASSWORD: ${{ secrets.XGC_CN_PASSWORD }}
+      EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
+      EXTRA_NAMESPACE: ${{ secrets.EXTRA_NAMESPACE }}
+      EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
+      EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
     steps:
-      - name: Mirror to private China registry when configured
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.EXTRA_REGISTRY }}
+          username: ${{ env.EXTRA_USERNAME }}
+          password: ${{ env.EXTRA_PASSWORD }}
+      - name: Mirror runnable images
         shell: bash
         run: |
           set -euo pipefail
-          values=(XGC_CN_REGISTRY XGC_CN_NAMESPACE XGC_CN_USERNAME XGC_CN_PASSWORD)
-          present=0
-          for name in "${values[@]}"; do
-            [ -n "${!name:-}" ] && present=$((present + 1))
-          done
-          if [ "${present}" -eq 0 ]; then
-            echo "China registry mirror not configured"
-            exit 0
-          fi
-          if [ "${present}" -ne 4 ]; then
-            echo "China registry mirror is partially configured" >&2
-            exit 1
-          fi
-          printf '%s' "${XGC_CN_PASSWORD}" | docker login "${XGC_CN_REGISTRY}" \
-            --username "${XGC_CN_USERNAME}" --password-stdin >/dev/null
+          # shellcheck source=scripts/ci-registry-roots.sh
+          source scripts/ci-registry-roots.sh
           sudo apt-get update >/dev/null
           sudo apt-get install -y --no-install-recommends skopeo >/dev/null
-          target="${XGC_CN_REGISTRY%/}/${XGC_CN_NAMESPACE#/}/xgc2-stt-service"
-          target="${target//\/\//\/}"
+          target="${EXTRA_ROOT}/xgc2-stt-service"
           tags=(base base-${VERSION} qwen qwen-${VERSION} latest)
           for tag in "${tags[@]}"; do
-            # GHCR indexes also contain SBOM/provenance attestations. Alibaba
-            # Personal Edition rejects their OCI empty config media type, so
-            # mirror only the runnable platform image and keep attestations on GHCR.
             skopeo copy --override-os linux --override-arch amd64 \
               --authfile "${HOME}/.docker/config.json" \
               "docker://${IMAGE}:${tag}" "docker://${target}:${tag}"

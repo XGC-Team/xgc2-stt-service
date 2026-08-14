@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   AppShell,
-  AudioCaptureControl,
   Button,
   CodeBlock,
   DescriptionItem,
@@ -15,6 +14,8 @@ import {
   ProgressBar,
   SegmentedControl,
   SortableDataTable,
+  SpeechClientWorkspace,
+  SpeechConnectionForm,
   StatusText,
   Topbar,
   useSkin,
@@ -434,52 +435,38 @@ export default function App() {
         />
       )}
     >
-      <div className="stt-workspace">
-        <Panel
-          className="capture-panel"
-          padding="none"
-          title="实时转写"
-          actions={streamState
-            ? <StatusText status={captureState}>{streamState}</StatusText>
-            : status?.engine.state !== 'ready' || statusError
-              ? <StatusText status={statusError ? 'offline' : status?.engine.state || 'connecting'} tone={engineTone}>{engineLabel}</StatusText>
-              : null}
-        >
-          <AudioCaptureControl
-            className="stt-audio-capture"
-            state={captureState}
-            actionLabel={recordLabel}
-            cancelLabel="取消"
-            error={captureError}
-            waveformLevels={waveformLevels}
-            waveformLabel="麦克风输入活动"
-            onAction={() => void toggleCapture()}
-            onCancel={() => void cancelCapture()}
-          />
-        </Panel>
-
-        <Panel
-          className="transcript-panel"
-          padding="none"
-          title="转写结果"
-          actions={(
-            <>
-              <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript} onClick={() => void copyTranscript()}>复制</Button>
-              <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript && captureState === 'idle'} onClick={() => void clearTranscript()}>清空</Button>
-            </>
-          )}
-        >
-          <div className="transcript" aria-live="polite">
-            <span className="final-text">{transcript}</span>
-            {partialStableText ? (
-              <span className="stable-partial-text">{transcript ? '\n' : ''}{partialStableText}</span>
-            ) : null}
-            {partialText ? (
-              <span className="partial-text">{transcript && !partialStableText ? '\n' : ''}{partialText}</span>
-            ) : null}
-          </div>
-        </Panel>
-
+      <SpeechClientWorkspace
+        capture={{
+          actionLabel: recordLabel,
+          cancelLabel: "取消",
+          className: "stt-audio-capture",
+          error: captureError,
+          onAction: () => void toggleCapture(),
+          onCancel: () => void cancelCapture(),
+          state: captureState,
+          waveformLabel: "麦克风输入活动",
+          waveformLevels,
+        }}
+        captureStatus={streamState
+          ? <StatusText status={captureState}>{streamState}</StatusText>
+          : status?.engine.state !== 'ready' || statusError
+            ? <StatusText status={statusError ? 'offline' : status?.engine.state || 'connecting'} tone={engineTone}>{engineLabel}</StatusText>
+            : null}
+        captureTitle="实时转写"
+        transcript={{
+          finalText: transcript,
+          label: "转写结果",
+          stablePartialText: partialStableText,
+          unstablePartialText: partialText,
+        }}
+        transcriptActions={(
+          <>
+            <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript} onClick={() => void copyTranscript()}>复制</Button>
+            <Button appearance="ghost" uiSize="compact" disabled={!hasTranscript && captureState === 'idle'} onClick={() => void clearTranscript()}>清空</Button>
+          </>
+        )}
+        transcriptTitle="转写结果"
+      >
         <Panel className="runtime-panel" padding="none" title="运行状态">
           {status ? (
             <DescriptionList className="runtime-grid">
@@ -530,7 +517,7 @@ export default function App() {
           />
           {apiKeyError ? <p className="status-error">{apiKeyError}</p> : null}
         </Panel>
-      </div>
+      </SpeechClientWorkspace>
 
       <Modal
         open={settingsOpen}
@@ -548,44 +535,20 @@ export default function App() {
         <form id="stt-settings" className="settings-form" onSubmit={(event) => void saveSettings(event)}>
           <section className="settings-section">
             <h3>客户端</h3>
-          <FormField label="API 地址" required>
-            <Input
-              type="url"
-              required
-              value={draftConnection.endpoint}
-              onValueChange={(endpoint) => setDraftConnection((current) => ({ ...current, endpoint }))}
+            <SpeechConnectionForm
+              labels={{
+                apiKey: 'API Key',
+                endpoint: 'API 地址',
+                keepLeadingSilence: '保留',
+                originalScript: '原样',
+                outputScript: '中文输出',
+                simplifiedScript: '简体',
+                trimLeadingSilence: '开头静音',
+                trimLeadingSilenceOption: '裁剪',
+              }}
+              onChange={setDraftConnection}
+              value={draftConnection}
             />
-          </FormField>
-          <FormField label="API Key">
-            <Input
-              type="password"
-              autoComplete="off"
-              value={draftConnection.apiKey}
-              onValueChange={(apiKey) => setDraftConnection((current) => ({ ...current, apiKey }))}
-            />
-          </FormField>
-          <FormGroup label="中文输出">
-            <SegmentedControl
-              ariaLabel="中文输出"
-              value={draftConnection.outputScript}
-              options={[{ label: '简体', value: 'simplified' }, { label: '原样', value: 'original' }]}
-              onValueChange={(value) => setDraftConnection((current) => ({
-                ...current,
-                outputScript: value as ConnectionSettings['outputScript'],
-              }))}
-            />
-          </FormGroup>
-          <FormGroup label="开头静音">
-            <SegmentedControl
-              ariaLabel="开头静音"
-              value={draftConnection.trimLeadingSilence ? 'trim' : 'keep'}
-              options={[{ label: '裁剪', value: 'trim' }, { label: '保留', value: 'keep' }]}
-              onValueChange={(value) => setDraftConnection((current) => ({
-                ...current,
-                trimLeadingSilence: value === 'trim',
-              }))}
-            />
-          </FormGroup>
           </section>
           {draftRuntime ? (
             <section className="settings-section">
