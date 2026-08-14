@@ -448,6 +448,21 @@ def _enable_child_subreaper() -> None:
         return
 
 
+def _reap_adopted_children() -> None:
+    """Reap grandchildren adopted via PR_SET_CHILD_SUBREAPER.
+
+    After the launcher exits, killed workers become zombies of this
+    process. ``kill(pid, 0)`` and ``/proc`` still see them until waitpid.
+    """
+    while True:
+        try:
+            pid, _status = os.waitpid(-1, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if pid == 0:
+            return
+
+
 def _pids_in_group(process_group_id: int) -> list[int]:
     """Return live PIDs that still belong to *process_group_id*."""
     found: set[int] = set()
@@ -496,6 +511,7 @@ def _signal_process_group(process_group_id: int, sig: int) -> None:
     for pid in _pids_in_group(process_group_id):
         with suppress(ProcessLookupError, PermissionError, OSError):
             os.kill(pid, sig)
+    _reap_adopted_children()
 
 
 async def _terminate_process_group(
@@ -549,6 +565,7 @@ async def _wait_for_process_until(process: asyncio.subprocess.Process, deadline:
 async def _wait_for_process_group_until(process_group_id: int, deadline: float) -> bool:
     proc_available = Path("/proc").is_dir()
     while True:
+        _reap_adopted_children()
         if proc_available:
             members = [pid for pid in _pids_in_group(process_group_id) if pid not in {1, os.getpid()}]
             if not members:
