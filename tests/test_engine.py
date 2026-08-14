@@ -75,7 +75,17 @@ def test_managed_engine_close_terminates_orphaned_worker_process_group(tmp_path:
             except ProcessLookupError:
                 pass
             else:
-                raise AssertionError("orphaned worker survived engine.close()")
+                try:
+                    worker_pgid = os.getpgid(worker_pid)
+                except ProcessLookupError:
+                    worker_pgid = None
+                listing = os.popen("ps -eo pid,pgid,ppid,args").read()
+                raise AssertionError(
+                    "orphaned worker survived engine.close() "
+                    f"pid={worker_pid} worker_pgid={worker_pgid} "
+                    f"launcher={process.pid} self={os.getpid()} "
+                    f"scanned={engine_module._pids_in_group(process.pid)!r}\n{listing}"
+                )
         finally:
             await engine.close()
             if worker_pid is not None:

@@ -450,24 +450,42 @@ def _enable_child_subreaper() -> None:
 
 def _pids_in_group(process_group_id: int) -> list[int]:
     """Return live PIDs that still belong to *process_group_id*."""
-    found: list[int] = []
+    found: set[int] = set()
+    skip = {0, 1, os.getpid()}
     proc_dir = Path("/proc")
     try:
         entries = list(proc_dir.iterdir())
     except OSError:
-        return found
+        entries = []
     for entry in entries:
         if not entry.name.isdigit():
             continue
         pid = int(entry.name)
-        if pid in {1, os.getpid()}:
+        if pid in skip:
             continue
         try:
             if os.getpgid(pid) == process_group_id:
-                found.append(pid)
+                found.add(pid)
         except (ProcessLookupError, PermissionError, OSError):
             continue
-    return found
+    try:
+        import subprocess as sp
+
+        completed = sp.run(
+            ["ps", "-o", "pid=", "-g", str(process_group_id)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+        for token in completed.stdout.split():
+            if token.isdigit():
+                pid = int(token)
+                if pid not in skip:
+                    found.add(pid)
+    except (FileNotFoundError, OSError, ValueError):
+        pass
+    return list(found)
 
 
 def _signal_process_group(process_group_id: int, sig: int) -> None:
