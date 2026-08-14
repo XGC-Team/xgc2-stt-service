@@ -44,6 +44,11 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      - name: Install source-gate tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep
+
       - name: Run source gates
         run: |
           uv sync --frozen --extra dev --extra desktop

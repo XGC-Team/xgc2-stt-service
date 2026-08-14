@@ -62,6 +62,10 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
+      - name: Install source-gate tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ripgrep
       - name: Run mandatory source and package gates
         run: |
           uv sync --frozen --extra dev --extra desktop
