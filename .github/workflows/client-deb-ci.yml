@@ -19,9 +19,12 @@ on:
       - "src/xgc2_stt/desktop_audio.py"
       - "src/xgc2_stt/desktop_cli.py"
       - "src/xgc2_stt/desktop_support.py"
+      - "src/xgc2_stt/engine.py"
       - "tests/test_desktop_support.py"
       - "tests/test_desktop_audio.py"
       - "tests/test_desktop_cli.py"
+      - "tests/test_engine.py"
+      - "tests/test_docker_image_workflow_contract.py"
       - "tests/test_client_privacy_gate.py"
   pull_request:
     branches: [main]
@@ -41,9 +44,12 @@ on:
       - "src/xgc2_stt/desktop_audio.py"
       - "src/xgc2_stt/desktop_cli.py"
       - "src/xgc2_stt/desktop_support.py"
+      - "src/xgc2_stt/engine.py"
       - "tests/test_desktop_support.py"
       - "tests/test_desktop_audio.py"
       - "tests/test_desktop_cli.py"
+      - "tests/test_engine.py"
+      - "tests/test_docker_image_workflow_contract.py"
       - "tests/test_client_privacy_gate.py"
   workflow_dispatch:
 

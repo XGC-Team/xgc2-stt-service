@@ -267,6 +267,7 @@ class VllmEngine:
             }
         )
         try:
+            _enable_child_subreaper()
             self._process = await asyncio.create_subprocess_exec(
                 *build_engine_command(self.settings),
                 env=environment,
@@ -424,39 +425,58 @@ async def _cuda_device_count() -> int | None:
         return None
 
 
-def _pids_in_group(process_group_id: int) -> list[int]:
-    """Return live PIDs that still belong to *process_group_id*.
+def _enable_child_subreaper() -> None:
+    """Adopt grandchildren when a launcher exits before its workers.
 
-    ``killpg`` can raise ``ProcessLookupError`` after the session leader
-    exits even when orphaned workers remain (common in Docker PID
-    namespaces). Scanning ``/proc`` finds those members.
+    Docker PID namespaces often make ``killpg`` return ESRCH after the
+    session leader dies, even though orphaned workers are still running.
     """
+    try:
+        import ctypes
+
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl.argtypes = [
+            ctypes.c_int,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+        ]
+        libc.prctl.restype = ctypes.c_int
+        libc.prctl(36, 1, 0, 0, 0)  # PR_SET_CHILD_SUBREAPER
+    except (AttributeError, OSError):
+        return
+
+
+def _pids_in_group(process_group_id: int) -> list[int]:
+    """Return live PIDs that still belong to *process_group_id*."""
     found: list[int] = []
     proc_dir = Path("/proc")
     try:
-        entries = proc_dir.iterdir()
+        entries = list(proc_dir.iterdir())
     except OSError:
         return found
     for entry in entries:
         if not entry.name.isdigit():
             continue
+        pid = int(entry.name)
+        if pid in {1, os.getpid()}:
+            continue
         try:
-            text = (entry / "stat").read_text(encoding="utf-8")
-            rest = text.rsplit(")", 1)[1].split()
-            if int(rest[2]) == process_group_id:
-                found.append(int(entry.name))
-        except (OSError, IndexError, ValueError):
+            if os.getpgid(pid) == process_group_id:
+                found.append(pid)
+        except (ProcessLookupError, PermissionError, OSError):
             continue
     return found
 
 
 def _signal_process_group(process_group_id: int, sig: int) -> None:
-    with suppress(ProcessLookupError, PermissionError):
+    with suppress(ProcessLookupError, PermissionError, OSError):
         os.killpg(process_group_id, sig)
+    with suppress(ProcessLookupError, PermissionError, OSError):
+        os.kill(-process_group_id, sig)
     for pid in _pids_in_group(process_group_id):
-        if pid in {1, os.getpid()}:
-            continue
-        with suppress(ProcessLookupError, PermissionError):
+        with suppress(ProcessLookupError, PermissionError, OSError):
             os.kill(pid, sig)
 
 
