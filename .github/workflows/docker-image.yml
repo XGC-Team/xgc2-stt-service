@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
-      EXTRA_NAMESPACE: ${{ secrets.EXTRA_NAMESPACE }}
+      EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
       EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
       EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
     outputs:
@@ -55,10 +55,10 @@ jobs:
           # shellcheck source=scripts/ci-registry-roots.sh
           source scripts/ci-registry-roots.sh
           present=0
-          for key in EXTRA_REGISTRY EXTRA_NAMESPACE EXTRA_USERNAME EXTRA_PASSWORD; do
+          for key in EXTRA_REGISTRY EXTRA_USERNAME EXTRA_PASSWORD; do
             [ -n "${!key:-}" ] && present=$((present + 1))
           done
-          if [ "${present}" -eq 4 ]; then
+          if [ "${present}" -eq 3 ] && [ -n "${EXTRA_NAMESPACE:-}" ]; then
             echo "extra=1" >> "${GITHUB_OUTPUT}"
           elif [ "${present}" -eq 0 ]; then
             echo "extra=0" >> "${GITHUB_OUTPUT}"
@@ -225,7 +225,7 @@ jobs:
     timeout-minutes: 180
     env:
       EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
-      EXTRA_NAMESPACE: ${{ secrets.EXTRA_NAMESPACE }}
+      EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
       EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
       EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
     steps:
