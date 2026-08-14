@@ -235,6 +235,22 @@ def format_desktop_version() -> str:
     return f"{CLIENT_BINARY} {__version__}"
 
 
+def run_desktop_cli(argv: list[str] | None = None) -> int:
+    """Parse argv and start the tray UI.
+
+    `--version` and `--help` must not import pynput, Xlib, or Qt. Those
+    backends require a display and would fail headless `xgc2-stt-client
+    --version` checks used by package smoke tests.
+    """
+    args = parse_desktop_cli(sys.argv[1:] if argv is None else argv)
+    if args.version:
+        sys.stdout.write(f"{format_desktop_version()}\n")
+        return 0
+    from xgc2_stt.desktop import main as desktop_main
+
+    return desktop_main(sys.argv[1:] if argv is None else argv)
+
+
 def ipc_socket_path() -> Path:
     runtime = os.environ.get("XDG_RUNTIME_DIR")
     if runtime:

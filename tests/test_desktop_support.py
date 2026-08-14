@@ -105,6 +105,17 @@ def test_cli_version_and_toggle_flags() -> None:
     assert settings.settings is True
 
 
+def test_version_cli_does_not_import_tray_backends(capsys: pytest.CaptureFixture[str]) -> None:
+    import sys
+
+    sys.modules.pop("xgc2_stt.desktop", None)
+    from xgc2_stt.desktop_support import run_desktop_cli
+
+    assert run_desktop_cli(["--version"]) == 0
+    assert capsys.readouterr().out.startswith("xgc2-stt-client ")
+    assert "xgc2_stt.desktop" not in sys.modules
+
+
 def test_cli_help_exits_zero() -> None:
     from xgc2_stt.desktop_support import parse_desktop_cli
 
