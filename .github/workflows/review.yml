@@ -15,10 +15,10 @@ jobs:
   review:
     runs-on: ubuntu-latest
     container:
-      image: ${{ format('{0}/{1}/xgc2-build-noble-dev:1.0.0', replace(replace(secrets.EXTRA_REGISTRY, 'https://', ''), 'http://', ''), vars.EXTRA_NAMESPACE) }}
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
       credentials:
-        username: ${{ secrets.EXTRA_USERNAME }}
-        password: ${{ secrets.EXTRA_PASSWORD }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 

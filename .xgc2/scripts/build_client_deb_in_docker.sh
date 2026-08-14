@@ -17,12 +17,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "${architecture}" in amd64) platform=linux/amd64 ;; arm64) platform=linux/arm64 ;; *) exit 2 ;; esac
-case "${distribution}" in focal|jammy|noble) ;; *) echo "Supported distributions: focal, jammy, noble." >&2; exit 2 ;; esac
-if [[ -n "${XGC2_CLIENT_BUILD_IMAGE:-}" ]]; then
-  build_image="${XGC2_CLIENT_BUILD_IMAGE}"
-else
-  build_image="$("${script_dir}/extra_build_image.sh" "xgc2-build-${distribution}-dev:${image_tag}")"
-fi
+case "${distribution}" in
+  focal) build_image="${XGC2_CLIENT_BUILD_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:${image_tag}}" ;;
+  jammy) build_image="${XGC2_CLIENT_BUILD_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:${image_tag}}" ;;
+  noble) build_image="${XGC2_CLIENT_BUILD_IMAGE:-ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:${image_tag}}" ;;
+  *) echo "Supported distributions: focal, jammy, noble." >&2; exit 2 ;;
+esac
 command -v docker >/dev/null
 mkdir -p "${output_dir}"
 output_dir="$(cd "${output_dir}" && pwd -P)"

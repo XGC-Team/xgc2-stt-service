@@ -13,8 +13,6 @@ required=(
   .xgc2/scripts/build_client_deb_in_docker.sh
   .xgc2/scripts/check_client_package.sh
   .xgc2/scripts/check_client_privacy.sh
-  .xgc2/scripts/extra_build_image.sh
-  .xgc2/scripts/extra_registry_login.sh
   .xgc2/scripts/physical_client_x11.py
   .xgc2/scripts/smoke_client_deb.sh
   .xgc2/scripts/xgc2_artifact_manifest.py
@@ -60,10 +58,8 @@ fi
 grep -Fq 'python3-gi' .xgc2/scripts/build_client_deb.sh
 grep -Fq 'python3-pyaudio' .xgc2/scripts/build_client_deb.sh
 grep -Fq 'needs: [release-guard, source-tests]' .github/workflows/client-deb.yml
-grep -Fq 'secrets.EXTRA_REGISTRY' .github/workflows/client-deb.yml
-grep -Fq 'secrets.EXTRA_REGISTRY' .github/workflows/client-deb-ci.yml
-grep -Fq 'xgc2-build-noble-dev:1.0.0' .github/workflows/client-deb.yml
-grep -Fq 'xgc2-build-focal-dev:1.0.0' .github/workflows/client-deb-ci.yml
+grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0' .github/workflows/client-deb.yml
+grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0' .github/workflows/client-deb-ci.yml
 if grep -Eq 'run_cpp_quality|run_source_tests|--clobber|gh release upload' \
   .github/workflows/client-deb.yml; then
   echo "Desktop release workflow contains a bypass or overwrite path." >&2
@@ -72,11 +68,6 @@ fi
 if grep -Eq 'astral-sh/setup-uv|actions/setup-node|ubuntu:20\.04|ubuntu:22\.04|ubuntu:24\.04' \
   .github/workflows/client-deb.yml .github/workflows/client-deb-ci.yml; then
   echo "Desktop workflows must use xgc2-build images without toolchain bootstrap." >&2
-  exit 1
-fi
-if grep -Fq 'ghcr.io/xgc-team/xgc2-images/' \
-  .github/workflows/client-deb.yml .github/workflows/client-deb-ci.yml; then
-  echo "Desktop workflows must pull xgc2-build images from EXTRA_REGISTRY." >&2
   exit 1
 fi
 ./.xgc2/scripts/check_client_privacy.sh source

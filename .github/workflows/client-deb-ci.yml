@@ -58,10 +58,10 @@ jobs:
   source-tests:
     runs-on: ubuntu-latest
     container:
-      image: ${{ format('{0}/{1}/xgc2-build-noble-dev:1.0.0', replace(replace(secrets.EXTRA_REGISTRY, 'https://', ''), 'http://', ''), vars.EXTRA_NAMESPACE) }}
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
       credentials:
-        username: ${{ secrets.EXTRA_USERNAME }}
-        password: ${{ secrets.EXTRA_PASSWORD }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Run mandatory source and package gates
@@ -82,59 +82,47 @@ jobs:
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: focal
-            image_name: xgc2-build-focal-dev:1.0.0
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: jammy
-            image_name: xgc2-build-jammy-dev:1.0.0
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:1.0.0
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: noble
-            image_name: xgc2-build-noble-dev:1.0.0
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: focal
-            image_name: xgc2-build-focal-dev:1.0.0
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: jammy
-            image_name: xgc2-build-jammy-dev:1.0.0
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: noble
-            image_name: xgc2-build-noble-dev:1.0.0
+            build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
-      - name: Login to extra image registry
-        env:
-          EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
-          EXTRA_USERNAME: ${{ secrets.EXTRA_USERNAME }}
-          EXTRA_PASSWORD: ${{ secrets.EXTRA_PASSWORD }}
-        run: ./.xgc2/scripts/extra_registry_login.sh
       - name: Build ${{ matrix.distribution }} Deb
         env:
-          EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
-          EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
+          XGC2_CLIENT_BUILD_IMAGE: ${{ matrix.build_image }}
         run: |
-          export XGC2_CLIENT_BUILD_IMAGE="$(./.xgc2/scripts/extra_build_image.sh "${{ matrix.image_name }}")"
           ./.xgc2/scripts/build_client_deb_in_docker.sh \
             --distribution "${{ matrix.distribution }}" \
             --architecture "${{ matrix.architecture }}" \
             --output-dir "$GITHUB_WORKSPACE/debs"
       - name: Smoke-test installed package on ${{ matrix.distribution }}
-        env:
-          EXTRA_REGISTRY: ${{ secrets.EXTRA_REGISTRY }}
-          EXTRA_NAMESPACE: ${{ vars.EXTRA_NAMESPACE }}
         run: |
-          image="$(./.xgc2/scripts/extra_build_image.sh "${{ matrix.image_name }}")"
           docker run --rm --platform "${{ matrix.platform }}" \
             -e TARGET_ARCH="${{ matrix.architecture }}" \
-            -v "$GITHUB_WORKSPACE:/work:ro" -w /work "${image}" bash -lc '
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.build_image }} bash -lc '
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
               apt-get -o Acquire::Retries=5 update >/dev/null

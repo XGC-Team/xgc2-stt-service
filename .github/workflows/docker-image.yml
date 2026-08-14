@@ -29,10 +29,10 @@ jobs:
     name: Source checks
     runs-on: ubuntu-latest
     container:
-      image: ${{ format('{0}/{1}/xgc2-build-noble-dev:1.0.0', replace(replace(secrets.EXTRA_REGISTRY, 'https://', ''), 'http://', ''), vars.EXTRA_NAMESPACE) }}
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
       credentials:
-        username: ${{ secrets.EXTRA_USERNAME }}
-        password: ${{ secrets.EXTRA_PASSWORD }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -67,10 +67,10 @@ jobs:
     needs: [checks, compose]
     runs-on: ubuntu-latest
     container:
-      image: ${{ format('{0}/{1}/xgc2-build-noble-dev:1.0.0', replace(replace(secrets.EXTRA_REGISTRY, 'https://', ''), 'http://', ''), vars.EXTRA_NAMESPACE) }}
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
       credentials:
-        username: ${{ secrets.EXTRA_USERNAME }}
-        password: ${{ secrets.EXTRA_PASSWORD }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
       packages: read
