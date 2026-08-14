@@ -7,6 +7,7 @@ import signal
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
@@ -326,11 +327,11 @@ class VllmEngine:
         process_group_id = self._process_group_id
         self._process = None
         self._process_group_id = None
-        if process is None:
+        if process is None and process_group_id is None:
             return
         if process_group_id is not None:
             await _terminate_process_group(process, process_group_id)
-        else:
+        elif process is not None:
             await _terminate_process(process)
 
     async def reconfigure(self, settings: Settings) -> None:
@@ -423,27 +424,60 @@ async def _cuda_device_count() -> int | None:
         return None
 
 
+def _pids_in_group(process_group_id: int) -> list[int]:
+    """Return live PIDs that still belong to *process_group_id*.
+
+    ``killpg`` can raise ``ProcessLookupError`` after the session leader
+    exits even when orphaned workers remain (common in Docker PID
+    namespaces). Scanning ``/proc`` finds those members.
+    """
+    found: list[int] = []
+    proc_dir = Path("/proc")
+    try:
+        entries = proc_dir.iterdir()
+    except OSError:
+        return found
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            text = (entry / "stat").read_text(encoding="utf-8")
+            rest = text.rsplit(")", 1)[1].split()
+            if int(rest[2]) == process_group_id:
+                found.append(int(entry.name))
+        except (OSError, IndexError, ValueError):
+            continue
+    return found
+
+
+def _signal_process_group(process_group_id: int, sig: int) -> None:
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(process_group_id, sig)
+    for pid in _pids_in_group(process_group_id):
+        if pid in {1, os.getpid()}:
+            continue
+        with suppress(ProcessLookupError, PermissionError):
+            os.kill(pid, sig)
+
+
 async def _terminate_process_group(
-    process: asyncio.subprocess.Process,
+    process: asyncio.subprocess.Process | None,
     process_group_id: int,
     *,
     timeout: float = 30,
 ) -> None:
     """Stop an engine launcher and every worker it spawned in its session."""
-    try:
-        os.killpg(process_group_id, signal.SIGTERM)
-    except ProcessLookupError:
-        await process.wait()
-        return
+    _signal_process_group(process_group_id, signal.SIGTERM)
 
     deadline = asyncio.get_running_loop().time() + timeout
-    await _wait_for_process_until(process, deadline)
+    if process is not None:
+        await _wait_for_process_until(process, deadline)
     if await _wait_for_process_group_until(process_group_id, deadline):
         return
 
-    with suppress(ProcessLookupError):
-        os.killpg(process_group_id, signal.SIGKILL)
-    await _wait_for_process_until(process, asyncio.get_running_loop().time() + 5)
+    _signal_process_group(process_group_id, signal.SIGKILL)
+    if process is not None:
+        await _wait_for_process_until(process, asyncio.get_running_loop().time() + 5)
     await _wait_for_process_group_until(process_group_id, asyncio.get_running_loop().time() + 5)
 
 
@@ -475,11 +509,17 @@ async def _wait_for_process_until(process: asyncio.subprocess.Process, deadline:
 
 
 async def _wait_for_process_group_until(process_group_id: int, deadline: float) -> bool:
+    proc_available = Path("/proc").is_dir()
     while True:
-        try:
-            os.killpg(process_group_id, 0)
-        except ProcessLookupError:
-            return True
+        if proc_available:
+            members = [pid for pid in _pids_in_group(process_group_id) if pid not in {1, os.getpid()}]
+            if not members:
+                return True
+        else:
+            try:
+                os.killpg(process_group_id, 0)
+            except ProcessLookupError:
+                return True
         if asyncio.get_running_loop().time() >= deadline:
             return False
         await asyncio.sleep(0.1)

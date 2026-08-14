@@ -35,7 +35,7 @@ def test_main_pushes_run_checks_without_entering_publish_jobs() -> None:
     assert "if:" not in jobs["checks"]
     assert "github.event_name == 'workflow_dispatch'" in jobs["release-guard"]
     assert "github.event_name == 'workflow_dispatch'" in jobs["build"]
-    assert "needs: checks" in jobs["release-guard"]
+    assert "needs: [checks, compose]" in jobs["release-guard"]
     assert "needs: release-guard" in jobs["build"]
 
 
@@ -82,8 +82,8 @@ def test_release_identity_and_registry_checks_fail_closed() -> None:
     assert "type == \"array\"" in guard
     assert "mirror_enabled=false" in guard
     assert "mirror_enabled=true" in guard
-    assert mirror.count("skopeo login") == 2
-    assert "skopeo list-tags" in mirror
+    assert mirror.count("login --authfile") == 2
+    assert "list-tags --authfile" in mirror
     assert 'source="docker://${IMAGE}@${BUILD_DIGEST}"' in mirror
     assert 'destination="docker://${target}:${RELEASE_TAG}"' in mirror
     assert '"${destination_digest}" == "${source_digest}"' in mirror
