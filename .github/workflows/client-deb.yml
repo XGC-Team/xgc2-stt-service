@@ -1,4 +1,5 @@
 name: Desktop client Deb release
+# Dependencies come from xgc2-images. Do not apt-get / pip / uv sync / npm ci.
 
 on:
   workflow_dispatch:
@@ -92,15 +93,15 @@ jobs:
   source-tests:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
       - name: Run desktop source tests
         run: |
           export PATH="/usr/local/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}"
-          uv sync --frozen --extra dev --extra desktop
-          uv run ruff check src tests
-          uv run pytest
+          export PYTHONPATH="${GITHUB_WORKSPACE}/src${PYTHONPATH:+:${PYTHONPATH}}"
+          ruff check src tests
+          pytest
           ./.xgc2/scripts/check_client_package.sh
 
   build-and-smoke:
@@ -115,31 +116,37 @@ jobs:
             platform: linux/amd64
             distribution: focal
             build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0
+            smoke_image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-client-focal:1.0.0
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: jammy
             build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:1.0.0
+            smoke_image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-client-jammy:1.0.0
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
             distribution: noble
             build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+            smoke_image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: focal
             build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0
+            smoke_image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-client-focal:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: jammy
             build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-jammy-dev:1.0.0
+            smoke_image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-client-jammy:1.0.0
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
             distribution: noble
             build_image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+            smoke_image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
       - name: Build ${{ matrix.distribution }} Deb
@@ -154,11 +161,9 @@ jobs:
         run: |
           docker run --rm --platform "${{ matrix.platform }}" \
             -e TARGET_ARCH="${{ matrix.architecture }}" \
-            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.build_image }} bash -lc '
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.smoke_image }} bash -lc '
               set -euo pipefail
-              export DEBIAN_FRONTEND=noninteractive
-              apt-get -o Acquire::Retries=5 update >/dev/null
-              apt-get install -y --no-install-recommends ./debs/xgc2-stt-client_*.deb >/dev/null
+              dpkg -i ./debs/xgc2-stt-client_*.deb
               ./.xgc2/scripts/smoke_client_deb.sh ./debs/xgc2-stt-client_*.deb
             '
       - name: Create release-train build manifest

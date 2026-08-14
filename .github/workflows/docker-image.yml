@@ -24,12 +24,15 @@ concurrency:
 env:
   IMAGE: ghcr.io/xgc-team/xgc2-stt-service
 
+# Dependencies come from xgc2-images (xgc2-stt-dev / xgc2-stt-runtime).
+# Do not apt-get / pip / uv sync / npm ci in this workflow.
+
 jobs:
   checks:
     name: Source checks
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -38,10 +41,10 @@ jobs:
       - name: Run source gates
         run: |
           export PATH="/usr/local/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}"
-          uv sync --frozen --extra dev --extra desktop
-          uv run ruff check src tests scripts/verify-stream.py
-          env -u DISPLAY -u WAYLAND_DISPLAY uv run pytest
-          npm --prefix web ci
+          export PYTHONPATH="${GITHUB_WORKSPACE}/src${PYTHONPATH:+:${PYTHONPATH}}"
+          ln -sfn /opt/xgc2-stt/web/node_modules web/node_modules
+          ruff check src tests scripts/verify-stream.py
+          env -u DISPLAY -u WAYLAND_DISPLAY pytest
           npm --prefix web run test
           npm --prefix web run typecheck
           npm --prefix web run build
@@ -65,7 +68,7 @@ jobs:
     needs: [checks, compose]
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
     permissions:
       contents: read
       packages: read

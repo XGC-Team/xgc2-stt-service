@@ -1,16 +1,15 @@
-ARG QWEN_VLLM_IMAGE=vllm/vllm-openai:v0.14.0@sha256:1d6866b87630d94f5e0cdae55ab5abb4ce0b03fcb84d9d10612f9d518d19d4fd
+ARG STT_DEV_IMAGE=ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
+ARG STT_RUNTIME_IMAGE=ghcr.io/xgc-team/xgc2-images/xgc2-stt-runtime:1.0.0
 
-FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS web-builder
+FROM ${STT_DEV_IMAGE} AS web-builder
 
 WORKDIR /build/web
-COPY web/package.json web/package-lock.json web/.npmrc ./
-RUN npm ci
 COPY web/ ./
-RUN npm run build
+RUN ln -sfn /opt/xgc2-stt/web/node_modules node_modules \
+ && npm run build
 
-FROM ${QWEN_VLLM_IMAGE} AS base
+FROM ${STT_RUNTIME_IMAGE} AS base
 
-ARG DEBIAN_FRONTEND=noninteractive
 ARG APP_VERSION=0.1.0
 
 LABEL org.opencontainers.image.title="XGC2 STT Base" \
@@ -22,10 +21,6 @@ LABEL org.opencontainers.image.title="XGC2 STT Base" \
       io.xgc2.stt.weights="external"
 
 USER root
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl tini sox libsox-fmt-all; \
-    rm -rf /var/lib/apt/lists/*
 RUN getent passwd 2000 >/dev/null || \
     useradd --uid 2000 --gid 0 --no-create-home --home-dir /var/lib/xgc2-stt --shell /usr/sbin/nologin xgc2-stt
 
@@ -45,14 +40,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /opt/xgc2-stt/app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
-RUN uv pip install --system --no-cache-dir . "qwen-asr[vllm]==0.0.6"
+RUN python3 -m pip install --no-cache-dir --no-deps .
 
 RUN install -d -o 2000 -g 0 -m 0770 \
       /var/lib/xgc2-stt \
       /opt/xgc2-stt/models \
       /opt/xgc2-stt/web; \
     install -d /opt/xgc2-stt/licenses; \
-    cp /usr/share/common-licenses/Apache-2.0 /opt/xgc2-stt/licenses/APACHE-2.0.txt
+    if [ -f /usr/share/common-licenses/Apache-2.0 ]; then \
+      cp /usr/share/common-licenses/Apache-2.0 /opt/xgc2-stt/licenses/APACHE-2.0.txt; \
+    fi
 
 COPY --from=web-builder --chown=2000:0 /build/web/dist/ /opt/xgc2-stt/web/
 
@@ -66,7 +63,7 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["uvicorn", "xgc2_stt.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
-FROM ${QWEN_VLLM_IMAGE} AS qwen-weights
+FROM ${STT_RUNTIME_IMAGE} AS qwen-weights
 ARG QWEN_MODEL=Qwen/Qwen3-ASR-1.7B
 ARG QWEN_REVISION=7278e1e70fe206f11671096ffdd38061171dd6e5
 

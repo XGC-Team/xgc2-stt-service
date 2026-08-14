@@ -11,20 +11,23 @@ concurrency:
   group: stt-review-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Dependencies come from xgc2-images (xgc2-stt-dev).
+# Do not apt-get / pip / uv sync / npm ci in this workflow.
+
 jobs:
   review:
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
+      image: ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
       - name: Source, WebUI, and shell checks
         run: |
           export PATH="/usr/local/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}"
-          uv sync --frozen --extra dev --extra desktop
-          uv run ruff check src tests scripts/verify-stream.py
-          env -u DISPLAY -u WAYLAND_DISPLAY uv run pytest
-          npm --prefix web ci
+          export PYTHONPATH="${GITHUB_WORKSPACE}/src${PYTHONPATH:+:${PYTHONPATH}}"
+          ln -sfn /opt/xgc2-stt/web/node_modules web/node_modules
+          ruff check src tests scripts/verify-stream.py
+          env -u DISPLAY -u WAYLAND_DISPLAY pytest
           npm --prefix web run test
           npm --prefix web run typecheck
           npm --prefix web run build
