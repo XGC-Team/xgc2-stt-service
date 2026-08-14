@@ -1,0 +1,14 @@
+name: CI bootstrap gate
+# Copy to .github/workflows/ci-bootstrap-gate.yml in product repos.
+# Pin @master so gate tightenings apply without a 60-repo bump.
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: XGC-Team/xgc2-images/.github/workflows/reusable-check-ci-bootstrap.yml@master
