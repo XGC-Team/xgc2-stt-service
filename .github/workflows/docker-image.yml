@@ -28,7 +28,7 @@ concurrency:
 
 env:
   VERSION: 0.1.0
-  IMAGE: ghcr.io/${{ github.repository }}
+  IMAGE: ghcr.io/xgc-team/xgc2-stt-service
 
 jobs:
   checks:
