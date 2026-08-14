@@ -18,11 +18,11 @@ class Settings(BaseSettings):
     internal_host: str = "127.0.0.1"
     internal_port: int = Field(default=8001, ge=1, le=65535)
 
-    engine_variant: str = "voxtral"
-    model_id: str = "mistralai/Voxtral-Mini-4B-Realtime-2602"
-    model_name: str = "mistralai/Voxtral-Mini-4B-Realtime-2602"
+    engine_variant: str = "qwen"
+    model_id: str = "Qwen/Qwen3-ASR-1.7B"
+    model_name: str = "Qwen/Qwen3-ASR-1.7B"
     compute_type: str = "bfloat16"
-    transcription_delay_ms: int = Field(default=480, ge=80, le=10_000)
+    transcription_delay_ms: int = Field(default=1000, ge=80, le=10_000)
     gpu_memory_utilization: float = Field(default=0.80, gt=0.1, le=0.98)
     max_model_len: int = Field(default=32_768, ge=2048, le=262_144)
     max_num_seqs: int = Field(default=8, ge=1, le=128)
@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     @field_validator("engine_variant")
     @classmethod
     def validate_engine_variant(cls, value: str) -> str:
-        if value not in {"voxtral", "qwen"}:
-            raise ValueError("engine_variant must be voxtral or qwen")
+        if value != "qwen":
+            raise ValueError("engine_variant must be qwen")
         return value
 
     @property

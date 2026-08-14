@@ -174,7 +174,7 @@ def create_app(
     @app.put("/api/settings")
     async def runtime_settings_update(payload: RuntimeTuning) -> dict[str, Any]:
         updates = payload.model_dump(exclude_none=True)
-        if config.engine_variant == "qwen" and updates.get("max_active_streams", 1) != 1:
+        if updates.get("max_active_streams", 1) != 1:
             raise HTTPException(status_code=400, detail="the current Qwen streaming backend supports one active stream")
         runtime_store.update(payload)
         for key, value in updates.items():

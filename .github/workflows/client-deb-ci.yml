@@ -63,26 +63,50 @@ jobs:
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
+            distribution: focal
+            ubuntu_image: ubuntu:20.04
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            distribution: jammy
+            ubuntu_image: ubuntu:22.04
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            distribution: noble
+            ubuntu_image: ubuntu:24.04
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
+            distribution: focal
+            ubuntu_image: ubuntu:20.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            distribution: jammy
+            ubuntu_image: ubuntu:22.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            distribution: noble
+            ubuntu_image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.9.24"
           enable-cache: true
-      - name: Build Focal Deb
+      - name: Build ${{ matrix.distribution }} Deb
         run: |
           ./.xgc2/scripts/build_client_deb_in_docker.sh \
-            --distribution focal \
+            --distribution "${{ matrix.distribution }}" \
             --architecture "${{ matrix.architecture }}" \
             --output-dir "$GITHUB_WORKSPACE/debs"
-      - name: Smoke-test installed package on Focal
+      - name: Smoke-test installed package on ${{ matrix.distribution }}
         run: |
           docker run --rm --platform "${{ matrix.platform }}" \
             -e TARGET_ARCH="${{ matrix.architecture }}" \
-            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ubuntu:20.04 bash -lc '
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.ubuntu_image }} bash -lc '
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
               apt-get -o Acquire::Retries=5 update >/dev/null
@@ -99,7 +123,7 @@ jobs:
             --output-dir .ci/build-manifests \
             --product xgc2-stt-client \
             --product-version "$version" \
-            --distribution focal \
+            --distribution "${{ matrix.distribution }}" \
             --architecture "${{ matrix.architecture }}" \
             --source-sha "$GITHUB_SHA" \
             --ci-run-id "$GITHUB_RUN_ID" \
@@ -107,7 +131,7 @@ jobs:
             --ci-workflow-ref "$GITHUB_WORKFLOW_REF"
       - uses: actions/upload-artifact@v4
         with:
-          name: xgc2-stt-client-focal-${{ matrix.architecture }}
+          name: xgc2-stt-client-${{ matrix.distribution }}-${{ matrix.architecture }}
           path: |
             debs/*.deb
             .ci/build-manifests/*.json

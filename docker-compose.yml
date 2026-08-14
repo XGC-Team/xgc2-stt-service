@@ -1,6 +1,6 @@
 services:
   stt:
-    image: ${STT_IMAGE:-ghcr.io/lxk36/xgc2-stt-service:voxtral-0.1.0}
+    image: ${STT_IMAGE:-ghcr.io/xgc-team/xgc2-stt-service:qwen-0.1.0}
     container_name: xgc2-stt-service
     restart: unless-stopped
     gpus: ${NVIDIA_VISIBLE_DEVICES:-all}
@@ -33,7 +33,7 @@ services:
       start_period: 10m
 
   api:
-    image: ${STT_IMAGE:-ghcr.io/lxk36/xgc2-stt-service:voxtral-0.1.0}
+    image: ${STT_IMAGE:-ghcr.io/xgc-team/xgc2-stt-service:qwen-0.1.0}
     container_name: xgc2-stt-api
     restart: unless-stopped
     depends_on:

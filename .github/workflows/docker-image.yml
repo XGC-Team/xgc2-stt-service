@@ -68,7 +68,6 @@ jobs:
           npm --prefix web run build
           docker compose config >/dev/null
           STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
-          STT_VARIANT=voxtral docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
           bash -n scripts/*.sh
 
   base:
@@ -116,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [qwen, voxtral]
+        variant: [qwen]
     steps:
       - uses: actions/checkout@v4
 
@@ -143,7 +142,7 @@ jobs:
             echo "${IMAGE}:${VARIANT}-${VERSION}"
             echo "${IMAGE}:${VARIANT}"
             echo "${IMAGE}:${VARIANT}-sha-${GITHUB_SHA}"
-            if [ "${VARIANT}" = voxtral ]; then
+            if [ "${VARIANT}" = qwen ]; then
               echo "${IMAGE}:latest"
             fi
             echo 'EOF'
@@ -198,7 +197,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends skopeo >/dev/null
           target="${XGC_CN_REGISTRY%/}/${XGC_CN_NAMESPACE#/}/xgc2-stt-service"
           target="${target//\/\//\/}"
-          tags=(base base-${VERSION} qwen qwen-${VERSION} voxtral voxtral-${VERSION} latest)
+          tags=(base base-${VERSION} qwen qwen-${VERSION} latest)
           for tag in "${tags[@]}"; do
             # GHCR indexes also contain SBOM/provenance attestations. Alibaba
             # Personal Edition rejects their OCI empty config media type, so

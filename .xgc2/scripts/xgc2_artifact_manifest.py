@@ -47,7 +47,7 @@ def deb_entry(path: Path) -> dict[str, Any]:
 def identity(args: argparse.Namespace) -> None:
     if args.product != "xgc2-stt-client":
         raise ValueError("unexpected product")
-    if args.distribution != "focal" or args.architecture not in {"amd64", "arm64"}:
+    if args.distribution not in {"focal", "jammy", "noble"} or args.architecture not in {"amd64", "arm64"}:
         raise ValueError("unsupported distribution or architecture")
     if not SHA.fullmatch(args.source_sha):
         raise ValueError("source_sha must contain 40 or 64 lowercase hex characters")

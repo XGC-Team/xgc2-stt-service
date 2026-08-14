@@ -7,9 +7,10 @@
   <project_license>MIT</project_license>
   <description>
     <p>
-      Connects a Linux X11 desktop to a streaming speech-recognition service
-      selected by the user. The application provides a configurable global
-      shortcut, live revision preview, and focused text insertion.
+      Connects a Linux desktop (X11 or Wayland) to a streaming speech-recognition
+      service selected by the user. The application lives in the status area,
+      provides a configurable global shortcut or CLI toggle, live revision
+      preview, and focused text insertion with a clipboard fallback.
     </p>
     <p>No service address or credential is bundled with the application.</p>
   </description>

@@ -6,10 +6,19 @@ from PyInstaller.utils.hooks import get_package_paths
 
 repo_root = Path(SPECPATH).parents[1]
 pyside_root = Path(get_package_paths("PySide6")[1])
+# PySide6 6.7.3 already packages for Ubuntu 20.04 (manylinux_2_28). Keep the
+# same Qt runtime for 22.04/24.04 and ship both xcb and Wayland plugins so the
+# tray client can run on either session type without an Electron/Tauri stack.
 required_plugins = {
     "platforms/libqxcb.so",
+    "platforms/libqwayland-generic.so",
+    "platforms/libqwayland-egl.so",
     "platforminputcontexts/libcomposeplatforminputcontextplugin.so",
     "platforminputcontexts/libibusplatforminputcontextplugin.so",
+    "wayland-shell-integration/libxdg-shell.so",
+    "wayland-shell-integration/libwl-shell-plugin.so",
+    "wayland-graphics-integration-client/libqt-plugin-wayland-egl.so",
+    "wayland-decoration-client/libbradient.so",
 }
 plugin_binaries = [
     (str(pyside_root / "Qt" / "plugins" / relative), f"PySide6/Qt/plugins/{Path(relative).parent}")
@@ -20,7 +29,11 @@ analysis = Analysis(
     pathex=[str(repo_root / "src")],
     binaries=plugin_binaries,
     datas=[],
-    hiddenimports=["pynput.keyboard._xorg", "pynput.mouse._xorg"],
+    hiddenimports=[
+        "pynput.keyboard._xorg",
+        "pynput.mouse._xorg",
+        "pynput.keyboard._uinput",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -31,7 +44,6 @@ analysis = Analysis(
         "dbm",
         "fastapi",
         "httpx",
-        "mistral_common",
         "numpy",
         "opencc",
         "PySide6.QtNetwork",
@@ -48,16 +60,17 @@ analysis = Analysis(
 # the Python runtime and lib-dynload extensions when this method is used.
 analysis.exclude_system_libraries()
 
-# PyInstaller's Qt hooks intentionally collect plugins for many deployment
-# targets. This package is explicitly X11-only, so keep a small auditable
-# allowlist and drop Wayland, embedded, VNC, image-codec and platform-theme
-# plugins together with the now-unreferenced Qt modules they pulled in.
+# Keep an auditable Qt allowlist. Include Wayland client libraries so the tray
+# can use the native compositor; drop compositor/server, VNC, eglfs and
+# multimedia plugins that this client does not use.
 allowed_qt_libraries = {
     "libQt6Core.so.6",
     "libQt6DBus.so.6",
     "libQt6Gui.so.6",
     "libQt6Widgets.so.6",
     "libQt6XcbQpa.so.6",
+    "libQt6WaylandClient.so.6",
+    "libQt6WaylandEglClientHwIntegration.so.6",
     "libicudata.so.73",
     "libicui18n.so.73",
     "libicuuc.so.73",

@@ -2,6 +2,6 @@ services:
   stt:
     build:
       context: .
-      target: ${STT_VARIANT:-voxtral}
+      target: ${STT_VARIANT:-qwen}
       args:
         APP_VERSION: ${STT_VERSION:-0.1.0}

@@ -16,7 +16,24 @@ for command_name in curl dpkg-deb readelf sha256sum tar uv; do
   }
 done
 
-case "${distribution}" in focal) ;; *) echo "Only focal is currently supported." >&2; exit 2 ;; esac
+case "${distribution}" in
+  focal)
+    ubuntu_release="20.04"
+    libc6_dep="libc6 (>= 2.31)"
+    ;;
+  jammy)
+    ubuntu_release="22.04"
+    libc6_dep="libc6 (>= 2.35)"
+    ;;
+  noble)
+    ubuntu_release="24.04"
+    libc6_dep="libc6 (>= 2.39)"
+    ;;
+  *)
+    echo "Supported distributions: focal, jammy, noble." >&2
+    exit 2
+    ;;
+esac
 case "${architecture}" in amd64|arm64) ;; *) echo "Only amd64 and arm64 are supported." >&2; exit 2 ;; esac
 [[ "$(dpkg --print-architecture)" == "${architecture}" ]] || {
   echo "Build host architecture does not match ${architecture}." >&2
@@ -284,12 +301,15 @@ Priority: optional
 Architecture: ${architecture}
 Installed-Size: ${installed_size}
 Maintainer: ${maintainer}
-Depends: libasound2 (>= 1.0.16), libc6 (>= 2.31), libdbus-1-3, libegl1, libfontconfig1, libgl1, libglib2.0-0, libportaudio2, libx11-6, libx11-xcb1, libxcb1, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxext6, libxkbcommon-x11-0, libxkbcommon0, libzstd1 (>= 1.4.4), xclip, xdotool
-Recommends: libayatana-appindicator3-1 | libappindicator3-1
+Depends: libasound2 (>= 1.0.16) | libasound2t64, ${libc6_dep}, libdbus-1-3, libegl1, libfontconfig1, libgl1, libglib2.0-0 | libglib2.0-0t64, libportaudio2, libwayland-client0, libwayland-cursor0, libwayland-egl1, libx11-6, libx11-xcb1, libxcb1, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxext6, libxkbcommon-x11-0, libxkbcommon0, libzstd1 (>= 1.4.4)
+Recommends: libayatana-appindicator3-1 | libappindicator3-1, wl-clipboard, xclip, xdotool
+Suggests: wtype, ydotool
 Description: Desktop client for a self-hosted streaming STT API
- Provides an X11 status-area client with microphone capture, a configurable
- global shortcut, live transcript preview, and focused text insertion. The
- service URL and API key are supplied by the user after installation.
+ Provides a status-area client with microphone capture, a configurable
+ global shortcut, live transcript preview, and focused text insertion.
+ On Wayland, insertion falls back to the clipboard when a paste keystroke
+ cannot be synthesized. The service URL and API key are supplied by the
+ user after installation. Autostart is optional and off by default.
 EOF
 chmod 0644 "${pkg_root}/DEBIAN/control"
 
@@ -297,7 +317,7 @@ chmod 0644 "${pkg_root}/DEBIAN/control"
 # so repeated builds of the same source produce the same Deb bytes.
 find "${pkg_root}" -exec touch --no-dereference --date="@${SOURCE_DATE_EPOCH}" {} +
 
-deb="${output_dir}/${package_name}_${package_version}_${architecture}.deb"
+deb="${output_dir}/${package_name}_${package_version}_${architecture}.ubuntu-${ubuntu_release}.deb"
 dpkg-deb --root-owner-group --build "${pkg_root}" "${deb}" >/dev/null
 "${script_dir}/check_client_privacy.sh" deb "${deb}"
 echo "${deb}"

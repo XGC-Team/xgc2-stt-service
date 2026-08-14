@@ -2,8 +2,8 @@ schema: xgc2.product.v1
 id: xgc2-stt-client
 name: XGC2 STT Desktop Client
 version: 0.1.0-1
-kind: desktop-apt
-summary: X11 tray client for a user-supplied XGC2-compatible streaming STT API.
+kind: desktop-deb
+summary: Tray client for a user-supplied XGC2-compatible streaming STT API.
 groups:
 - desktop
 - audio
@@ -14,19 +14,26 @@ apt:
   packages:
   - xgc2-stt-client
   depends:
+  - wl-clipboard
   - xclip
   - xdotool
 usage:
-  install: 'sudo apt update
+  install: 'Download the Ubuntu matching .deb from GitHub Releases, then:
 
-    sudo apt install xgc2-stt-client
+    sudo dpkg -i xgc2-stt-client_0.1.0-1_amd64.ubuntu-22.04.deb
+
+    sudo apt-get install -f
 
     '
   smoke_test: 'dpkg-query -W xgc2-stt-client
 
+    xgc2-stt-client --version
+
     '
   notes: The package contains no service URL, API key, private registry, or network port.
     On first launch, the user supplies an endpoint operated by themselves or their organization.
+    Autostart is a Settings option and is not enabled by package installation. Debs are
+    published on GitHub Releases, not through an APT repository.
 ownership:
   paths:
   - /opt/xgc2-stt-client
@@ -40,3 +47,5 @@ release:
   ci_workflow: client-deb-ci.yml
   apt_versions:
     focal: 0.1.0-1
+    jammy: 0.1.0-1
+    noble: 0.1.0-1

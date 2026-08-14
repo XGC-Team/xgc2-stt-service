@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -76,3 +77,158 @@ def test_explicit_schema_hotkey_is_not_rewritten(tmp_path: Path, hotkey: str) ->
     )
 
     assert load_desktop_settings(target).hotkey == hotkey
+
+
+def test_autostart_is_written_and_removed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from xgc2_stt.desktop_support import autostart_path, set_autostart
+
+    target = set_autostart(True, ["xgc2-stt-client"])
+    assert target == autostart_path()
+    text = target.read_text(encoding="utf-8")
+    assert "Exec=xgc2-stt-client" in text
+    assert "X-GNOME-Autostart-enabled=true" in text
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644
+    set_autostart(False)
+    assert not target.exists()
+
+
+def test_cli_version_and_toggle_flags() -> None:
+    from xgc2_stt.desktop_support import format_desktop_version, parse_desktop_cli
+
+    args = parse_desktop_cli(["--version"])
+    assert args.version is True
+    assert format_desktop_version().startswith("xgc2-stt-client ")
+    toggle = parse_desktop_cli(["--toggle-capture"])
+    assert toggle.toggle_capture is True
+    settings = parse_desktop_cli(["--settings"])
+    assert settings.settings is True
+
+
+def test_cli_help_exits_zero() -> None:
+    from xgc2_stt.desktop_support import parse_desktop_cli
+
+    with pytest.raises(SystemExit) as caught:
+        parse_desktop_cli(["--help"])
+    assert caught.value.code == 0
+
+
+def test_session_type_prefers_xdg(monkeypatch: pytest.MonkeyPatch) -> None:
+    from xgc2_stt.desktop_support import apply_qt_platform, desktop_session_type, is_wayland_session
+
+    monkeypatch.setenv("XDG_SESSION_TYPE", "wayland")
+    monkeypatch.delenv("QT_QPA_PLATFORM", raising=False)
+    assert desktop_session_type() == "wayland"
+    assert is_wayland_session() is True
+    apply_qt_platform()
+    assert os.environ["QT_QPA_PLATFORM"] == "wayland;xcb"
+
+
+def test_insert_uses_xdotool_on_x11() -> None:
+    from xgc2_stt.desktop_support import insert_finalized_text
+
+    calls: list[list[str]] = []
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in {"xclip", "xdotool"} else None
+
+    def run(command: list[str], **_kwargs: object) -> object:
+        calls.append(command)
+
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    copied: list[str] = []
+    outcome = insert_finalized_text(
+        "你好",
+        paste_shortcut="desktop",
+        session_type="x11",
+        set_clipboard=copied.append,
+        which=which,
+        run=run,
+    )
+    assert copied == ["你好"]
+    assert outcome.pasted is True
+    assert outcome.method == "xdotool"
+    assert any(command[:2] == ["/usr/bin/xdotool", "key"] for command in calls)
+
+
+def test_insert_wayland_falls_back_to_clipboard() -> None:
+    from xgc2_stt.desktop_support import insert_finalized_text
+
+    def which(name: str) -> str | None:
+        return "/usr/bin/wl-copy" if name == "wl-copy" else None
+
+    def run(command: list[str], **_kwargs: object) -> object:
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    outcome = insert_finalized_text(
+        "定稿",
+        paste_shortcut="desktop",
+        session_type="wayland",
+        set_clipboard=lambda _text: None,
+        which=which,
+        run=run,
+    )
+    assert outcome.copied is True
+    assert outcome.pasted is False
+    assert outcome.method == "clipboard"
+
+
+def test_insert_wayland_prefers_wtype() -> None:
+    from xgc2_stt.desktop_support import insert_finalized_text
+
+    calls: list[list[str]] = []
+
+    def which(name: str) -> str | None:
+        return f"/usr/bin/{name}" if name in {"wl-copy", "wtype"} else None
+
+    def run(command: list[str], **_kwargs: object) -> object:
+        calls.append(command)
+
+        class Result:
+            returncode = 0
+
+        return Result()
+
+    outcome = insert_finalized_text(
+        "hello",
+        paste_shortcut="desktop",
+        session_type="wayland",
+        set_clipboard=lambda _text: None,
+        which=which,
+        run=run,
+    )
+    assert outcome.method == "wtype"
+    assert outcome.pasted is True
+    assert any(command[0] == "/usr/bin/wtype" for command in calls)
+
+
+def test_ipc_roundtrip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    from xgc2_stt.desktop_support import DesktopIpcListener, send_running_instance
+
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    received: list[str] = []
+    ready = threading.Event()
+
+    def handler(command: str) -> None:
+        received.append(command)
+        ready.set()
+
+    listener = DesktopIpcListener(handler)
+    listener.start()
+    try:
+        assert send_running_instance("toggle") is True
+        assert ready.wait(timeout=2)
+        assert received == ["toggle"]
+        assert send_running_instance("ping") is True
+    finally:
+        listener.stop()
+    assert send_running_instance("toggle") is False

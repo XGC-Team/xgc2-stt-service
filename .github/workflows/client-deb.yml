@@ -18,7 +18,7 @@ on:
         type: choice
         options: [release, compatibility-verify]
       apt_overlay_url:
-        description: Optional release-scoped staging APT base URL
+        description: Unused. Debs are published to GitHub Releases, not an APT repo.
         required: false
         default: ""
         type: string
@@ -37,10 +37,12 @@ on:
         required: true
         default: false
         type: boolean
+  push:
+    tags: ["v*"]
 
 permissions:
   actions: read
-  contents: read
+  contents: write
 
 env:
   XGC2_APT_OVERLAY_URL: ${{ inputs.apt_overlay_url }}
@@ -49,29 +51,50 @@ env:
 jobs:
   release-guard:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      source_sha: ${{ steps.identity.outputs.source_sha }}
+      publish: ${{ steps.identity.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release contract
+        id: identity
         env:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
-          PREPARE_ACTION: ${{ inputs.prepare_action }}
+          PREPARE_ACTION: ${{ inputs.prepare_action || 'release' }}
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == refs/heads/main ]]
-          [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$(git rev-parse HEAD)" == "$EXPECTED_SOURCE_SHA" ]]
-          [[ "$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)" == "$EXPECTED_VERSION" ]]
-          case "$PREPARE_ACTION" in release|compatibility-verify) ;; *) exit 1 ;; esac
-          if [[ -n "$XGC2_DEPENDENCY_SET_DIGEST" && ! "$XGC2_DEPENDENCY_SET_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+          version="$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)"
+          source_sha="$(git rev-parse HEAD)"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            [[ "$GITHUB_REF" == refs/heads/main ]]
+            [[ "$EXPECTED_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+            [[ "$source_sha" == "$EXPECTED_SOURCE_SHA" ]]
+            [[ "$version" == "$EXPECTED_VERSION" ]]
+            case "$PREPARE_ACTION" in release|compatibility-verify) ;; *) exit 1 ;; esac
+          else
+            [[ "$GITHUB_REF" == refs/tags/v* ]]
+            PREPARE_ACTION=release
+          fi
+          if [[ -n "${XGC2_DEPENDENCY_SET_DIGEST}" && ! "$XGC2_DEPENDENCY_SET_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
             echo "dependency_set_digest must be empty or 64 lowercase hex characters" >&2
             exit 1
           fi
-          if [[ -n "$XGC2_APT_OVERLAY_URL" && -z "$XGC2_DEPENDENCY_SET_DIGEST" ]]; then
+          if [[ -n "${XGC2_APT_OVERLAY_URL}" && -z "$XGC2_DEPENDENCY_SET_DIGEST" ]]; then
             echo "apt_overlay_url requires dependency_set_digest" >&2
             exit 1
           fi
           ./.xgc2/scripts/check_client_package.sh
+          {
+            echo "version=${version}"
+            echo "source_sha=${source_sha}"
+            if [[ "$PREPARE_ACTION" == release ]]; then
+              echo "publish=true"
+            else
+              echo "publish=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
 
   cpp-quality:
     if: ${{ inputs.run_cpp_quality }}
@@ -104,26 +127,50 @@ jobs:
           - architecture: amd64
             runner: ubuntu-latest
             platform: linux/amd64
+            distribution: focal
+            ubuntu_image: ubuntu:20.04
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            distribution: jammy
+            ubuntu_image: ubuntu:22.04
+          - architecture: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+            distribution: noble
+            ubuntu_image: ubuntu:24.04
           - architecture: arm64
             runner: ubuntu-24.04-arm
             platform: linux/arm64
+            distribution: focal
+            ubuntu_image: ubuntu:20.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            distribution: jammy
+            ubuntu_image: ubuntu:22.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            distribution: noble
+            ubuntu_image: ubuntu:24.04
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.9.24"
           enable-cache: true
-      - name: Build Focal Deb
+      - name: Build ${{ matrix.distribution }} Deb
         run: |
           ./.xgc2/scripts/build_client_deb_in_docker.sh \
-            --distribution focal \
+            --distribution "${{ matrix.distribution }}" \
             --architecture "${{ matrix.architecture }}" \
             --output-dir "$GITHUB_WORKSPACE/debs"
-      - name: Smoke-test installed package on Focal
+      - name: Smoke-test installed package on ${{ matrix.distribution }}
         run: |
           docker run --rm --platform "${{ matrix.platform }}" \
             -e TARGET_ARCH="${{ matrix.architecture }}" \
-            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ubuntu:20.04 bash -lc '
+            -v "$GITHUB_WORKSPACE:/work:ro" -w /work ${{ matrix.ubuntu_image }} bash -lc '
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
               apt-get -o Acquire::Retries=5 update >/dev/null
@@ -138,20 +185,75 @@ jobs:
             --deb-dir debs \
             --output-dir .ci/build-manifests \
             --product xgc2-stt-client \
-            --product-version "${{ inputs.expected_version }}" \
-            --distribution focal \
+            --product-version "${{ needs.release-guard.outputs.version }}" \
+            --distribution "${{ matrix.distribution }}" \
             --architecture "${{ matrix.architecture }}" \
-            --source-sha "${{ inputs.expected_source_sha }}" \
+            --source-sha "${{ needs.release-guard.outputs.source_sha }}" \
             --ci-run-id "$GITHUB_RUN_ID" \
             --ci-workflow "$GITHUB_WORKFLOW" \
             --ci-workflow-ref "$GITHUB_WORKFLOW_REF"
       - uses: actions/upload-artifact@v4
-        if: ${{ inputs.prepare_action == 'release' }}
+        if: ${{ needs.release-guard.outputs.publish == 'true' }}
         with:
-          name: xgc2-stt-client-focal-${{ matrix.architecture }}-release-input
+          name: xgc2-stt-client-${{ matrix.distribution }}-${{ matrix.architecture }}-release-input
           path: |
             debs/*.deb
             .ci/build-manifests/*.json
           retention-days: 14
           if-no-files-found: error
           include-hidden-files: true
+
+  publish-github-release:
+    if: ${{ needs.release-guard.outputs.publish == 'true' }}
+    needs: [release-guard, build-and-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: xgc2-stt-client-*-release-input
+          path: dist
+          merge-multiple: true
+      - name: Publish Debs to GitHub Releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.release-guard.outputs.version }}
+          SOURCE_SHA: ${{ needs.release-guard.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          debs=(dist/*.deb)
+          [[ ${#debs[@]} -ge 3 ]] || {
+            echo "Expected Ubuntu 20.04/22.04/24.04 Debs, found ${#debs[@]}" >&2
+            ls -la dist >&2
+            exit 1
+          }
+          tag="desktop-v${VERSION}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+          fi
+          notes="$(mktemp)"
+          cat >"${notes}" <<EOF
+          Desktop client ${VERSION} for Ubuntu 20.04 (focal), 22.04 (jammy), and 24.04 (noble).
+
+          Download the \`.deb\` that matches your Ubuntu release and architecture, then:
+
+          \`\`\`bash
+          sudo dpkg -i xgc2-stt-client_${VERSION}_amd64.ubuntu-22.04.deb
+          sudo apt-get install -f
+          xgc2-stt-client
+          \`\`\`
+
+          There is no APT repository. The package does not bundle a service URL or API key.
+          Source commit: ${SOURCE_SHA}
+          EOF
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" "${debs[@]}" --clobber
+          else
+            gh release create "${tag}" "${debs[@]}" \
+              --title "Desktop client ${VERSION}" \
+              --notes-file "${notes}" \
+              --target "${SOURCE_SHA}"
+          fi

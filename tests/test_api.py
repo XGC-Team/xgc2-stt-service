@@ -31,13 +31,13 @@ class FakeEngine:
     def status(self) -> dict[str, Any]:
         return {
             "state": self.state,
-            "backend": "vllm-realtime",
-            "variant": "voxtral",
-            "model": "mistralai/Voxtral-Mini-4B-Realtime-2602",
+            "backend": "qwen-asr-streaming",
+            "variant": "qwen",
+            "model": "Qwen/Qwen3-ASR-1.7B",
             "device": "cuda",
             "compute_type": "bfloat16",
             "cuda_devices": 1,
-            "transcription_delay_ms": 480,
+            "transcription_delay_ms": 1000,
         }
 
     async def open_session(self) -> FakeRealtimeSession:
@@ -269,10 +269,13 @@ def test_runtime_settings_distinguish_hot_changes_from_model_restart(tmp_path: P
     with TestClient(app) as client:
         current = client.get("/api/settings").json()
         assert current["values"]["silence_commit_ms"] == 2000
-        hot = client.put("/api/settings", json={"silence_commit_ms": 2500, "max_active_streams": 2})
+        hot = client.put("/api/settings", json={"silence_commit_ms": 2500})
         assert hot.status_code == 200
         assert hot.json()["restart_required"] is False
-        assert client.get("/api/status").json()["stream"]["capacity"] == 2
+        assert client.get("/api/status").json()["stream"]["capacity"] == 1
+
+        rejected = client.put("/api/settings", json={"max_active_streams": 2})
+        assert rejected.status_code == 400
 
         pending = client.put("/api/settings", json={"gpu_memory_utilization": 0.7})
         assert pending.json()["restart_required"] is True

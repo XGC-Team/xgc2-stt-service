@@ -2,7 +2,7 @@ export interface EngineStatus {
   state: 'idle' | 'loading' | 'ready' | 'error' | string
   error: string | null
   backend: string
-  variant: 'voxtral' | 'qwen' | string
+  variant: 'qwen' | string
   model: string
   device: string
   device_index: number

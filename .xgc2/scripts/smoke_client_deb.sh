@@ -18,6 +18,12 @@ grep -F './usr/share/applications/xgc2-stt-client.desktop' "${contents}" >/dev/n
 grep -F './usr/share/metainfo/io.xgc2.stt-client.metainfo.xml' "${contents}" >/dev/null
 dpkg-deb --extract "${deb}" "${extract_root}"
 binary="${extract_root}/opt/xgc2-stt-client/xgc2-stt-client"
+wayland_plugin="${extract_root}/opt/xgc2-stt-client/_internal/PySide6/Qt/plugins/platforms/libqwayland-generic.so"
+[[ -f "${wayland_plugin}" ]] || wayland_plugin="$(find "${extract_root}/opt/xgc2-stt-client" -name 'libqwayland-generic.so' -print -quit)"
+[[ -n "${wayland_plugin}" && -f "${wayland_plugin}" ]] || {
+  echo "Client package is missing the Qt Wayland platform plugin." >&2
+  exit 1
+}
 docs_root="${extract_root}/usr/share/doc/${package}"
 provenance_root="${docs_root}/python-build-standalone"
 qt_provenance_root="${docs_root}/qt-runtime"
@@ -51,7 +57,8 @@ grep -F '20251217' "${provenance_root}/PROVENANCE.md" >/dev/null
 grep -F 'PySide6_Essentials 6.7.3' "${qt_provenance_root}/PROVENANCE.md" >/dev/null
 grep -F '| OpenSSL | 3.5.4 |' "${docs_root}/THIRD_PARTY_NOTICES.md" >/dev/null
 for required_dependency in \
-  libdbus-1-3 libportaudio2 libx11-xcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+  libdbus-1-3 libportaudio2 libwayland-client0 libwayland-cursor0 libwayland-egl1 \
+  libx11-xcb1 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
   libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0; do
   dpkg-deb -f "${deb}" Depends | grep -Eq "(^|, )${required_dependency}([ ,(]|$)" || {
     echo "Client package is missing a direct runtime dependency: ${required_dependency}" >&2
@@ -87,6 +94,19 @@ if [[ "${status}" != 124 ]]; then
   echo "Client exited before the smoke window (status ${status})." >&2
   exit 1
 fi
+
+version_log="${smoke_home}/version.log"
+if ! HOME="${smoke_home}" timeout --signal=TERM --kill-after=3 8 \
+  "${binary}" --version >"${version_log}" 2>&1; then
+  cat "${version_log}" >&2
+  echo "Client --version failed." >&2
+  exit 1
+fi
+grep -Eq '^xgc2-stt-client [0-9]' "${version_log}" || {
+  cat "${version_log}" >&2
+  echo "Client --version did not print the package identity." >&2
+  exit 1
+}
 
 if dpkg-query -W -f='${db:Status-Abbrev}' "${package}" 2>/dev/null | grep -q '^ii'; then
   [[ -x /usr/bin/xgc2-stt-client ]]

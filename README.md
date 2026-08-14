@@ -16,7 +16,7 @@ organization and enter its URL and key during initial setup.
 | --- | --- |
 | GPU service | Model runtime, local management WebUI, API-key administration |
 | API gateway | HTTP and WebSocket speech-recognition endpoints without the management UI |
-| Desktop client | X11 tray application, global shortcut, preview and focused text insertion |
+| Desktop client | Tray application for X11 and Wayland, global shortcut or CLI toggle, preview and text insertion |
 
 The management interface and client-facing API are separate trust boundaries.
 Keep management access on loopback or a private administration network. Put
@@ -28,15 +28,14 @@ The following self-contained images share the same API:
 
 | Tag | Embedded model | Streaming mode |
 | --- | --- | --- |
-| `base-0.1.0` | none | Common CUDA/vLLM/API/WebUI runtime |
+| `base-0.1.0` | none | Qwen CUDA/vLLM/API/WebUI runtime |
 | `qwen-0.1.0` | Qwen3-ASR-1.7B | Revision-capable chunked recognition |
-| `voxtral-0.1.0` | Voxtral Mini 4B Realtime 2602 | Native realtime recognition |
-| `latest` | Voxtral Mini 4B Realtime 2602 | Current default release |
+| `latest` | Qwen3-ASR-1.7B | Current default release |
 
 Images are published to:
 
 ```text
-ghcr.io/lxk36/xgc2-stt-service:<tag>
+ghcr.io/xgc-team/xgc2-stt-service:<tag>
 ```
 
 Private mirrors are deployment configuration and are not recorded in this
@@ -62,9 +61,8 @@ ${EDITOR:-vi} .env
 ./scripts/deploy-local.sh
 ```
 
-Use `./scripts/deploy-local.sh qwen` for the Qwen variant. The deployment
-script pulls the image, starts or replaces the containers, waits for model
-readiness, and prints status. It does not download weights at runtime.
+The deployment script pulls the image, starts or replaces the containers, waits
+for model readiness, and prints status. It does not download weights at runtime.
 
 For manual Compose operation:
 
@@ -95,6 +93,8 @@ profiles are not intended for an 8 GB GPU without separate tuning.
 
 ## Management WebUI
 
+![STT management WebUI](docs/assets/webui-management.png)
+
 Open the management URL configured in `.env`. The UI provides:
 
 - model readiness and cached NVML GPU history;
@@ -115,11 +115,33 @@ cached metrics and do not invoke `nvidia-smi`.
 
 ## Desktop client
 
-`xgc2-stt-client` is a native PySide6 tray application for Linux/X11. It stays
-in the system status area while idle and provides capture, Settings and Quit.
+`xgc2-stt-client` is a PySide6/Qt 6 tray application for Ubuntu 20.04, 22.04,
+and 24.04 on both X11 and Wayland. Qt 6.7 is used because it already ships as
+a Focal-compatible wheel (manylinux_2_28) with a status-notifier tray, native
+Wayland and X11 plugins, and no extra web runtime. Launch it from the command
+line; it stays in the system status area and does not require a main window.
+
+![Desktop client settings](docs/assets/desktop-settings.png)
+
+![Status-area menu](docs/assets/desktop-tray-menu.png)
+
+![Transcript preview overlay](docs/assets/desktop-preview.png)
+
+```bash
+xgc2-stt-client --help
+xgc2-stt-client --version
+xgc2-stt-client
+xgc2-stt-client --toggle-capture
+```
+
 During recognition it shows a non-activating transcript preview and inserts
-only server-finalized text into the field that held focus when capture began.
-The default shortcut is `F9`; it can be changed in Settings.
+only server-finalized text into the focused field. On X11 this uses clipboard
+paste via `xclip`/`xdotool` when those helpers are present. On Wayland it uses
+the compositor clipboard plus `wtype`/`ydotool` when available; otherwise the
+finalized text remains on the clipboard so you can paste with Ctrl+V. The
+default shortcut is `F9`. If a Wayland compositor cannot grant a global grab,
+bind a system shortcut to `xgc2-stt-client --toggle-capture`, or use the tray
+menu.
 
 No server address or credential is bundled with the client package. On first
 run, open Settings and provide:
@@ -127,22 +149,24 @@ run, open Settings and provide:
 - the HTTPS URL of your own STT API;
 - an API key issued by that service's administrator;
 - the global shortcut and paste mode;
-- optional Auto Enter and Start at login.
+- optional Auto Enter and **Start at login** (off by default; writes or
+  removes `~/.config/autostart/xgc2-stt-client.desktop`).
 
-After configuring the XGC2 package repository supplied by your distributor,
-install and launch the client with APT:
+Download the `.deb` that matches your Ubuntu release from
+[GitHub Releases](https://github.com/XGC-Team/xgc2-stt-service/releases).
+There is no APT repository.
 
 ```bash
-sudo apt update
-sudo apt install xgc2-stt-client
+# Example: Ubuntu 22.04 amd64. Use ubuntu-20.04 or ubuntu-24.04 as needed.
+sudo dpkg -i xgc2-stt-client_0.1.0-1_amd64.ubuntu-22.04.deb
+sudo apt-get install -f
 xgc2-stt-client
 ```
 
-The package is intended to include the X11 text-injection dependencies. For
-source development, install them explicitly and use the repository installer:
+CI also uploads the same artifacts from the Desktop client Deb workflows.
+For source development:
 
 ```bash
-sudo apt install xdotool xclip
 ./scripts/install-client.sh
 xgc2-stt-client
 ```
@@ -150,11 +174,9 @@ xgc2-stt-client
 The first shortcut press starts capture; the next commits and stops. Silence
 finalizes a segment while keeping the microphone session available for later
 speech. Auto Enter submits each non-empty silence-finalized segment. Focus
-changes suppress both insertion and Enter. Client settings and the API key are
-stored in a mode-`0600` user configuration file.
-
-The validated desktop target is X11. Wayland requires a future desktop-portal
-implementation and is intentionally not bypassed.
+changes suppress both insertion and Enter on X11. Client settings and the API
+key are stored in a mode-`0600` user configuration file. Package installation
+does not enable autostart.
 
 ## API
 
@@ -229,9 +251,12 @@ multimedia runtimes:
 .xgc2/scripts/physical_client_x11.py /opt/xgc2-stt-client/xgc2-stt-client
 ```
 
-The release workflow publishes versioned `base`, `qwen`, and `voxtral` images
-to GHCR. Optional mirrors are controlled only by repository secrets. It does
-not deploy a hosted service.
+CI builds separate Ubuntu 20.04, 22.04, and 24.04 `.deb` files and publishes
+them to GitHub Releases (`desktop-v*` or the `v*` tag). The image workflow
+publishes versioned `base` and `qwen` images to
+`ghcr.io/xgc-team/xgc2-stt-service`, and tags `latest` to the Qwen release.
+Optional mirrors are controlled only by repository secrets. It does not deploy
+a hosted service.
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for model and runtime
 licenses and pinned-source information.

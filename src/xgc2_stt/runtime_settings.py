@@ -69,27 +69,6 @@ def settings_metadata() -> list[dict[str, str]]:
             "variant": "all",
         },
         {
-            "key": "max_model_len",
-            "label": "最大模型长度",
-            "unit": "",
-            "apply": "engine-restart",
-            "variant": "voxtral",
-        },
-        {
-            "key": "max_num_seqs",
-            "label": "最大序列数",
-            "unit": "",
-            "apply": "engine-restart",
-            "variant": "voxtral",
-        },
-        {
-            "key": "vllm_enforce_eager",
-            "label": "Eager 模式",
-            "unit": "",
-            "apply": "engine-restart",
-            "variant": "voxtral",
-        },
-        {
             "key": "qwen_chunk_size_seconds",
             "label": "Qwen 分块",
             "unit": "s",

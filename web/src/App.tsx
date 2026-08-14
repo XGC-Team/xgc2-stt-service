@@ -617,68 +617,33 @@ export default function App() {
                     : current)}
                 />
               </FormField>
-              {status?.engine.variant === 'qwen' ? (
-                <>
-                  <FormField label="Qwen 分块秒数 · 重启模型">
-                    <Input
-                      type="number"
-                      value={String(draftRuntime.qwen_chunk_size_seconds)}
-                      onValueChange={(value) => setDraftRuntime((current) => current
-                        ? { ...current, qwen_chunk_size_seconds: Number(value) }
-                        : current)}
-                    />
-                  </FormField>
-                  <FormField label="Qwen 回改分块 · 重启模型">
-                    <Input
-                      type="number"
-                      value={String(draftRuntime.qwen_unfixed_chunk_num)}
-                      onValueChange={(value) => setDraftRuntime((current) => current
-                        ? { ...current, qwen_unfixed_chunk_num: Number(value) }
-                        : current)}
-                    />
-                  </FormField>
-                  <FormField label="Qwen 回改 Token · 重启模型">
-                    <Input
-                      type="number"
-                      value={String(draftRuntime.qwen_unfixed_token_num)}
-                      onValueChange={(value) => setDraftRuntime((current) => current
-                        ? { ...current, qwen_unfixed_token_num: Number(value) }
-                        : current)}
-                    />
-                  </FormField>
-                </>
-              ) : (
-                <>
-                  <FormField label="最大模型长度 · 重启模型">
-                    <Input
-                      type="number"
-                      value={String(draftRuntime.max_model_len)}
-                      onValueChange={(value) => setDraftRuntime((current) => current
-                        ? { ...current, max_model_len: Number(value) }
-                        : current)}
-                    />
-                  </FormField>
-                  <FormField label="最大序列数 · 重启模型">
-                    <Input
-                      type="number"
-                      value={String(draftRuntime.max_num_seqs)}
-                      onValueChange={(value) => setDraftRuntime((current) => current
-                        ? { ...current, max_num_seqs: Number(value) }
-                        : current)}
-                    />
-                  </FormField>
-                  <FormGroup label="Eager 模式 · 重启模型">
-                    <SegmentedControl
-                      ariaLabel="Eager 模式"
-                      value={draftRuntime.vllm_enforce_eager ? 'on' : 'off'}
-                      options={[{ label: '关闭', value: 'off' }, { label: '开启', value: 'on' }]}
-                      onValueChange={(value) => setDraftRuntime((current) => current
-                        ? { ...current, vllm_enforce_eager: value === 'on' }
-                        : current)}
-                    />
-                  </FormGroup>
-                </>
-              )}
+              <FormField label="Qwen 分块秒数 · 重启模型">
+                <Input
+                  type="number"
+                  value={String(draftRuntime.qwen_chunk_size_seconds)}
+                  onValueChange={(value) => setDraftRuntime((current) => current
+                    ? { ...current, qwen_chunk_size_seconds: Number(value) }
+                    : current)}
+                />
+              </FormField>
+              <FormField label="Qwen 回改分块 · 重启模型">
+                <Input
+                  type="number"
+                  value={String(draftRuntime.qwen_unfixed_chunk_num)}
+                  onValueChange={(value) => setDraftRuntime((current) => current
+                    ? { ...current, qwen_unfixed_chunk_num: Number(value) }
+                    : current)}
+                />
+              </FormField>
+              <FormField label="Qwen 回改 Token · 重启模型">
+                <Input
+                  type="number"
+                  value={String(draftRuntime.qwen_unfixed_token_num)}
+                  onValueChange={(value) => setDraftRuntime((current) => current
+                    ? { ...current, qwen_unfixed_token_num: Number(value) }
+                    : current)}
+                />
+              </FormField>
             </section>
           ) : null}
           <section className="settings-section">

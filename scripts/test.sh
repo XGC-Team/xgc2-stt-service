@@ -13,5 +13,4 @@ npm --prefix web run build
 
 docker compose config >/dev/null
 STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
-STT_VARIANT=voxtral docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
 bash -n scripts/*.sh

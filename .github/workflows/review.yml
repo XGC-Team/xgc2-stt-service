@@ -48,7 +48,6 @@ jobs:
           npm --prefix web run build
           docker compose config >/dev/null
           STT_VARIANT=qwen docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
-          STT_VARIANT=voxtral docker compose -f docker-compose.yml -f docker-compose.build.yml config >/dev/null
           bash -n scripts/*.sh
           ./.xgc2/scripts/check_client_package.sh
 
@@ -58,4 +57,3 @@ jobs:
         run: |
           docker buildx build --call=check --target base .
           docker buildx build --call=check --target qwen .
-          docker buildx build --call=check --target voxtral .

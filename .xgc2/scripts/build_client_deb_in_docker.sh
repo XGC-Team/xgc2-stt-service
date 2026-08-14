@@ -17,7 +17,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 case "${architecture}" in amd64) platform=linux/amd64 ;; arm64) platform=linux/arm64 ;; *) exit 2 ;; esac
-[[ "${distribution}" == focal ]] || { echo "Only focal is currently supported." >&2; exit 2; }
+case "${distribution}" in
+  focal) ubuntu_image=ubuntu:20.04 ;;
+  jammy) ubuntu_image=ubuntu:22.04 ;;
+  noble) ubuntu_image=ubuntu:24.04 ;;
+  *) echo "Supported distributions: focal, jammy, noble." >&2; exit 2 ;;
+esac
 command -v docker >/dev/null
 uv_binary="$(command -v uv)"
 mkdir -p "${output_dir}"
@@ -49,13 +54,18 @@ docker run --rm --platform "${platform}" "${network_args[@]}" \
   -v "${output_dir}:/out" \
   -v "${cache_dir}:/cache" \
   -v "${uv_binary}:/usr/local/bin/uv:ro" \
-  ubuntu:20.04 bash -lc '
+  "${ubuntu_image}" bash -lc '
     set -euo pipefail
     restore_host_ownership() { chown -R "${HOST_UID}:${HOST_GID}" /cache /out || true; }
     trap restore_host_ownership EXIT
     if [[ -n "${APT_MIRROR}" ]]; then
       mirror="${APT_MIRROR%/}"
-      sed -i -E "s#https?://(archive|security)\.ubuntu\.com/ubuntu#${mirror}#g" /etc/apt/sources.list
+      if [[ -f /etc/apt/sources.list ]]; then
+        sed -i -E "s#https?://(archive|security)\\.ubuntu\\.com/ubuntu#${mirror}#g" /etc/apt/sources.list
+      fi
+      if [[ -f /etc/apt/sources.list.d/ubuntu.sources ]]; then
+        sed -i -E "s#https?://(archive|security)\\.ubuntu\\.com/ubuntu#${mirror}#g" /etc/apt/sources.list.d/ubuntu.sources
+      fi
     fi
     apt-get -o Acquire::Retries=5 update >/dev/null
     apt-get install -y --no-install-recommends binutils build-essential ca-certificates clang curl dpkg-dev python3 ripgrep >/dev/null

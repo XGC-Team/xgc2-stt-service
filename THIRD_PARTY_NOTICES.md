@@ -5,9 +5,8 @@ weights:
 
 | Component | Pinned source | License |
 | --- | --- | --- |
-| vLLM | `vllm/vllm-openai:v0.27.1-cu129` (`sha256:07913e94...`) | Apache-2.0 |
+| vLLM | `vllm/vllm-openai:v0.14.0` (`sha256:1d6866b8...`) | Apache-2.0 |
 | Qwen3-ASR-1.7B | `Qwen/Qwen3-ASR-1.7B@7278e1e70fe206f11671096ffdd38061171dd6e5` | Apache-2.0 |
-| Voxtral Mini 4B Realtime 2602 | `mistralai/Voxtral-Mini-4B-Realtime-2602@2769294da9567371363522aac9bbcfdd19447add` | Apache-2.0 |
 | XGC2 UI React | release package `v0.3.0` | See the package release |
 
 The upstream model cards and notices are retained inside each embedded model
@@ -81,7 +80,6 @@ do not describe shipped client functionality.
 
 - https://github.com/vllm-project/vllm
 - https://huggingface.co/Qwen/Qwen3-ASR-1.7B
-- https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602
 - https://www.python.org/downloads/release/python-31212/
 - https://github.com/astral-sh/python-build-standalone/tree/85fdc74d0153799b6807702865a8a29df3ced47a
 - https://code.qt.io/cgit/pyside/pyside-setup.git/

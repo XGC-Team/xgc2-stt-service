@@ -33,12 +33,17 @@ for script in .xgc2/scripts/*.sh; do bash -n "${script}"; done
 
 [[ "$(awk -F': *' '/^id:/ {print $2; exit}' .xgc2/product.yml)" == xgc2-stt-client ]]
 product_version="$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)"
-focal_version="$(awk -F': *' '
-  /^[[:space:]]+apt_versions:/ { seen = 1; next }
-  seen && /^[[:space:]]+focal:/ { print $2; exit }
-' .xgc2/product.yml)"
 [[ "${product_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*$ ]]
-[[ "${focal_version}" == "${product_version}" ]]
+for distro in focal jammy noble; do
+  distro_version="$(awk -F': *' -v distro="${distro}" '
+    /^[[:space:]]+apt_versions:/ { seen = 1; next }
+    seen && $1 ~ "^[[:space:]]+" distro "$" { print $2; exit }
+  ' .xgc2/product.yml)"
+  [[ "${distro_version}" == "${product_version}" ]] || {
+    echo "product.yml apt_versions.${distro} must match version ${product_version}" >&2
+    exit 1
+  }
+done
 grep -Eq '^PYTHON_STANDALONE_RELEASE=[0-9]{8}$' .xgc2/desktop.lock
 grep -Eq '^PYTHON_STANDALONE_COMMIT=[0-9a-f]{40}$' .xgc2/desktop.lock
 [[ "$(grep -Ec '^PYTHON_STANDALONE_(SOURCE|AMD64|ARM64)_SHA256=[0-9a-f]{64}$' .xgc2/desktop.lock)" == 3 ]]

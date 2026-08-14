@@ -1,10 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import queue
-import shutil
-import subprocess
 import sys
 import threading
 from array import array
@@ -13,7 +10,6 @@ from html import escape
 from typing import Any
 
 import sounddevice
-from pynput.keyboard import Controller as KeyboardController
 from pynput.keyboard import GlobalHotKeys, HotKey, Key, KeyCode
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent, QCursor, QMouseEvent, QTextCursor
@@ -42,10 +38,20 @@ from PySide6.QtWidgets import (
 from websockets.sync.client import connect
 from Xlib import XK, X, display, error
 
+from . import __version__
 from .desktop_support import (
+    DesktopIpcListener,
     DesktopSettings,
+    InsertionOutcome,
+    apply_qt_platform,
+    format_desktop_version,
+    insert_finalized_text,
+    is_wayland_session,
     load_desktop_settings,
+    packaged_client_command,
+    parse_desktop_cli,
     save_desktop_settings,
+    send_running_instance,
     set_autostart,
     should_auto_enter,
     streaming_headers,
@@ -258,7 +264,7 @@ class ExclusiveX11HotKey:
 
 def create_hotkey_listener(specification: str, callback: Any) -> ExclusiveX11HotKey | GlobalHotKeys:
     _parse_hotkey(specification)
-    if os.environ.get("XDG_SESSION_TYPE", "x11").lower() == "wayland":
+    if is_wayland_session():
         return GlobalHotKeys({specification: callback})
     return ExclusiveX11HotKey(specification, callback)
 
@@ -430,7 +436,7 @@ class AudioCapture(QObject):
 class FocusTracker:
     def __init__(self):
         self._display: Any = None
-        if os.environ.get("XDG_SESSION_TYPE", "x11").lower() == "wayland":
+        if is_wayland_session():
             return
         with suppress(Exception):
             from Xlib import display
@@ -449,12 +455,12 @@ class FocusTracker:
 class TextInjector:
     def __init__(self, application: QApplication):
         self.application = application
-        self.keyboard = KeyboardController()
         self.focus = FocusTracker()
         self.target_focus: int | None = None
         self.hypothesis = ""
         self.original_clipboard = ""
         self.last_clipboard = ""
+        self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
         self.shortcut = "terminal"
 
     def begin(self, shortcut: str) -> None:
@@ -463,6 +469,7 @@ class TextInjector:
         self.shortcut = shortcut
         self.original_clipboard = self.application.clipboard().text()
         self.last_clipboard = ""
+        self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
 
     def stage(self, hypothesis: str) -> bool:
         current_focus = self.focus.current()
@@ -471,36 +478,21 @@ class TextInjector:
         self.hypothesis = hypothesis
         return True
 
-    def _paste(self, text: str) -> None:
-        xclip = shutil.which("xclip")
-        xdotool = shutil.which("xdotool")
-        if xclip is None or xdotool is None:
-            raise RuntimeError("文本注入需要安装 xclip 和 xdotool")
-        chord = "ctrl+shift+v" if self.shortcut == "terminal" else "ctrl+v"
-        try:
-            copied = subprocess.run(
-                [xclip, "-selection", "clipboard", "-in"],
-                input=text.encode("utf-8"),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=2,
-                check=False,
-            )
-            if copied.returncode != 0:
-                raise RuntimeError("xclip 无法取得剪贴板所有权")
-            pasted = subprocess.run(
-                [xdotool, "key", "--clearmodifiers", chord],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=2,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise RuntimeError(f"文本注入失败: {exc}") from exc
-        if pasted.returncode != 0:
-            raise RuntimeError("xdotool 无法发送粘贴快捷键")
-        self.last_clipboard = text
+    def _paste(self, text: str, *, send_enter: bool = False) -> InsertionOutcome:
+        def set_clipboard(value: str) -> None:
+            self.application.clipboard().setText(value)
+
+        outcome = insert_finalized_text(
+            text,
+            paste_shortcut=self.shortcut,
+            send_enter=send_enter,
+            set_clipboard=set_clipboard,
+        )
+        if not outcome.copied:
+            raise RuntimeError(outcome.detail or "无法写入剪贴板")
+        if outcome.pasted or outcome.method == "clipboard":
+            self.last_clipboard = text
+        return outcome
 
     def end(self) -> None:
         clipboard = self.application.clipboard()
@@ -509,16 +501,16 @@ class TextInjector:
         self.target_focus = None
         self.hypothesis = ""
         self.last_clipboard = ""
+        self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
 
     def commit_segment(self, *, auto_enter: bool = False) -> bool:
         has_text = bool(self.hypothesis)
         current_focus = self.focus.current()
         focus_matches = self.target_focus is None or current_focus == self.target_focus
         if has_text and focus_matches:
-            self._paste(self.hypothesis)
-        if auto_enter and has_text and focus_matches:
-            self.keyboard.press(Key.enter)
-            self.keyboard.release(Key.enter)
+            self.last_outcome = self._paste(self.hypothesis, send_enter=auto_enter)
+        else:
+            self.last_outcome = InsertionOutcome(copied=False, pasted=False, method="empty")
         self.hypothesis = ""
         return focus_matches
 
@@ -601,6 +593,14 @@ class SettingsDialog(QDialog):
         self.start_at_login.setText("登录系统时自动启动")
         input_layout.addWidget(self.auto_enter)
         input_layout.addWidget(self.start_at_login)
+        hint = QLabel(
+            "客户端从命令行启动后驻留状态栏。登录自启动仅在勾选后写入 XDG autostart。"
+            " Wayland 下若全局快捷键不可用，可将系统快捷键绑定到 xgc2-stt-client --toggle-capture；"
+            " 无法注入按键时会把定稿文本留在剪贴板。"
+        )
+        hint.setWordWrap(True)
+        hint.setObjectName("fieldHint")
+        input_layout.addWidget(hint)
 
         content = QWidget()
         content.setObjectName("settingsContent")
@@ -692,6 +692,11 @@ class SettingsDialog(QDialog):
                 color: #9eaabd;
                 font-size: 11px;
                 font-weight: 500;
+            }
+            QLabel#fieldHint {
+                color: #8b97a8;
+                font-size: 11px;
+                line-height: 1.4;
             }
             QLineEdit, QComboBox, QDoubleSpinBox {
                 min-height: 38px;
@@ -886,8 +891,9 @@ class Overlay(QWidget):
 
 class ClientController(QObject):
     toggle_requested = Signal()
+    ipc_requested = Signal(str)
 
-    def __init__(self, application: QApplication):
+    def __init__(self, application: QApplication, *, start_capture: bool = False, open_settings: bool = False):
         super().__init__()
         self.application = application
         self.settings = load_desktop_settings()
@@ -897,9 +903,12 @@ class ClientController(QObject):
         self.injector = TextInjector(application)
         self.overlay = Overlay()
         self.toggle_requested.connect(self.toggle)
+        self.ipc_requested.connect(self._handle_ipc)
         self.hotkeys: ExclusiveX11HotKey | GlobalHotKeys | None = None
         self._hotkey_binding: tuple[int, frozenset[str]] | None = None
         self._shutting_down = False
+        self._ipc = DesktopIpcListener(self.ipc_requested.emit)
+        self._ipc.start()
         self._start_hotkey()
 
         icon = application.style().standardIcon(QStyle.StandardPixmap.SP_MediaVolume)
@@ -922,8 +931,19 @@ class ClientController(QObject):
         self.tray.show()
         self.overlay.hide()
         self._sync_tray()
-        if not self.settings.endpoint:
+        if open_settings or not self.settings.endpoint:
             QTimer.singleShot(0, self.open_settings)
+        elif start_capture:
+            QTimer.singleShot(0, self.toggle)
+
+    @Slot(str)
+    def _handle_ipc(self, command: str) -> None:
+        if command in {"toggle", "toggle-capture"}:
+            self.toggle()
+        elif command == "settings":
+            self.open_settings()
+        elif command == "activate":
+            self.tray.showMessage("XGC2 STT", "客户端已在状态栏运行", QSystemTrayIcon.MessageIcon.Information, 2500)
 
     def _sync_tray(self) -> None:
         label, tooltip, enabled = {
@@ -949,12 +969,42 @@ class ClientController(QObject):
         except Exception as exc:
             self.hotkeys = None
             self._hotkey_binding = None
+            if is_wayland_session():
+                message = (
+                    f"全局快捷键不可用: {exc}。请使用状态栏菜单，"
+                    "或把系统快捷键绑定到 xgc2-stt-client --toggle-capture。"
+                )
+                QTimer.singleShot(
+                    0,
+                    lambda: self.tray.showMessage(
+                        "XGC2 STT", message, QSystemTrayIcon.MessageIcon.Information, 6000
+                    ),
+                )
+                return
             message = f"快捷键不可用: {exc}"
             QTimer.singleShot(0, lambda: self._show_error(message))
 
     def _replace_hotkey(self, specification: str) -> None:
         binding = _parse_hotkey(specification)
         if self.hotkeys is not None and binding == self._hotkey_binding:
+            return
+        if is_wayland_session():
+            previous = self.hotkeys
+            try:
+                candidate = create_hotkey_listener(specification, self.toggle_requested.emit)
+                candidate.start()
+            except Exception:
+                if previous is not None:
+                    with suppress(Exception):
+                        previous.stop()
+                self.hotkeys = None
+                self._hotkey_binding = None
+                return
+            self.hotkeys = candidate
+            self._hotkey_binding = binding
+            if previous is not None:
+                with suppress(Exception):
+                    previous.stop()
             return
         candidate = create_hotkey_listener(specification, self.toggle_requested.emit)
         candidate.start()
@@ -1041,6 +1091,8 @@ class ClientController(QObject):
             return
         if not focus_matches:
             self.overlay.set_state("焦点已变", "#d7ae66")
+        elif self.injector.last_outcome.method == "clipboard":
+            self.overlay.set_state("已复制，请按 Ctrl+V", "#d7ae66")
         self.overlay.set_preview("", "", "")
 
     @Slot()
@@ -1082,10 +1134,7 @@ class ClientController(QObject):
         self.settings = candidate
         try:
             save_desktop_settings(candidate)
-            command = [shutil.which("xgc2-stt-client") or sys.executable]
-            if command[0] == sys.executable:
-                command.extend(["-m", "xgc2_stt.desktop"])
-            set_autostart(candidate.start_at_login, command)
+            set_autostart(candidate.start_at_login, packaged_client_command())
         except Exception as exc:
             self.settings = previous
             with suppress(Exception):
@@ -1115,16 +1164,34 @@ class ClientController(QObject):
             self.worker.cancel()
         if self.hotkeys is not None:
             self.hotkeys.stop()
+        if getattr(self, "_ipc", None) is not None:
+            self._ipc.stop()
         self.injector.end()
         self.tray.hide()
         self.application.quit()
 
 
-def main() -> int:
-    application = QApplication(sys.argv)
+def main(argv: list[str] | None = None) -> int:
+    args = parse_desktop_cli(sys.argv[1:] if argv is None else argv)
+    if args.version:
+        sys.stdout.write(f"{format_desktop_version()}\n")
+        return 0
+    if args.toggle_capture and send_running_instance("toggle"):
+        return 0
+    if args.settings and send_running_instance("settings"):
+        return 0
+    if not args.toggle_capture and not args.settings and send_running_instance("activate"):
+        return 0
+    apply_qt_platform()
+    application = QApplication([sys.argv[0]])
     application.setApplicationName("XGC2 STT Client")
+    application.setApplicationVersion(__version__)
     application.setQuitOnLastWindowClosed(False)
-    controller = ClientController(application)
+    controller = ClientController(
+        application,
+        start_capture=args.toggle_capture,
+        open_settings=args.settings,
+    )
     application.aboutToQuit.connect(controller.shutdown)
     return application.exec()
 

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import os
 import re
 import signal
@@ -13,7 +11,6 @@ from typing import Any, Protocol
 
 import httpx
 import numpy as np
-from websockets.asyncio.client import connect
 
 from .config import Settings
 
@@ -78,59 +75,6 @@ class SpeechEngine(Protocol):
 
 class EngineNotReady(RuntimeError):
     pass
-
-
-class VllmRealtimeSession:
-    def __init__(self, websocket: Any):
-        self.websocket = websocket
-
-    @classmethod
-    async def open(cls, settings: Settings) -> VllmRealtimeSession:
-        websocket = await connect(
-            settings.internal_websocket_url,
-            open_timeout=15,
-            close_timeout=5,
-            max_size=4 * 1024 * 1024,
-        )
-        try:
-            message = await asyncio.wait_for(websocket.recv(), timeout=15)
-            event = json.loads(message)
-            if event.get("type") != "session.created":
-                raise RuntimeError(f"unexpected vLLM handshake: {event.get('type', 'unknown')}")
-            await websocket.send(json.dumps({"type": "session.update", "model": settings.model_name}))
-            # A non-final commit starts the native realtime decoder.
-            await websocket.send(json.dumps({"type": "input_audio_buffer.commit"}))
-            return cls(websocket)
-        except Exception:
-            await websocket.close()
-            raise
-
-    async def send_pcm(self, pcm: bytes) -> None:
-        if not pcm:
-            return
-        await self.websocket.send(
-            json.dumps(
-                {
-                    "type": "input_audio_buffer.append",
-                    "audio": base64.b64encode(pcm).decode("ascii"),
-                }
-            )
-        )
-
-    async def commit(self) -> None:
-        await self.websocket.send(json.dumps({"type": "input_audio_buffer.commit", "final": True}))
-
-    async def receive(self) -> dict[str, Any]:
-        message = await self.websocket.recv()
-        if not isinstance(message, str):
-            raise RuntimeError("vLLM returned a non-JSON realtime event")
-        event = json.loads(message)
-        if not isinstance(event, dict):
-            raise RuntimeError("vLLM returned an invalid realtime event")
-        return event
-
-    async def close(self) -> None:
-        await self.websocket.close()
 
 
 class QwenSdkRealtimeSession:
@@ -266,43 +210,6 @@ def qwen_preview_parts(
     return text[:split_at], text[split_at:]
 
 
-def build_vllm_command(settings: Settings) -> list[str]:
-    command = [
-        "vllm",
-        "serve",
-        settings.model_id,
-        "--host",
-        settings.internal_host,
-        "--port",
-        str(settings.internal_port),
-        "--dtype",
-        settings.compute_type,
-        "--gpu-memory-utilization",
-        str(settings.gpu_memory_utilization),
-        "--max-model-len",
-        str(settings.max_model_len),
-        "--max-num-seqs",
-        str(settings.max_num_seqs),
-        "--served-model-name",
-        settings.model_name,
-    ]
-    command.extend(
-        [
-            "--tokenizer-mode",
-            "mistral",
-            "--config-format",
-            "mistral",
-            "--compilation-config",
-            json.dumps({"cudagraph_mode": "PIECEWISE"}, separators=(",", ":")),
-            "--hf-overrides",
-            json.dumps({"architectures": ["VoxtralRealtimeGeneration"]}, separators=(",", ":")),
-        ]
-    )
-    if settings.vllm_enforce_eager:
-        command.append("--enforce-eager")
-    return command
-
-
 def build_qwen_command(settings: Settings) -> list[str]:
     return [
         "qwen-asr-demo-streaming",
@@ -324,7 +231,7 @@ def build_qwen_command(settings: Settings) -> list[str]:
 
 
 def build_engine_command(settings: Settings) -> list[str]:
-    return build_qwen_command(settings) if settings.engine_variant == "qwen" else build_vllm_command(settings)
+    return build_qwen_command(settings)
 
 
 class VllmEngine:
@@ -358,8 +265,6 @@ class VllmEngine:
                 "HF_XET_HIGH_PERFORMANCE": "1",
             }
         )
-        if self.settings.engine_variant == "voxtral":
-            environment["VLLM_DISABLE_COMPILE_CACHE"] = "1"
         try:
             self._process = await asyncio.create_subprocess_exec(
                 *build_engine_command(self.settings),
@@ -389,8 +294,7 @@ class VllmEngine:
                     self._error = f"vLLM exited with code {process.returncode}"
                     return
                 try:
-                    health_path = "/" if self.settings.engine_variant == "qwen" else "/health"
-                    response = await client.get(f"{self.settings.internal_http_url}{health_path}")
+                    response = await client.get(f"{self.settings.internal_http_url}/")
                     if response.status_code == 200:
                         self._state = "ready"
                         self._loaded_at = time.time()
@@ -442,7 +346,7 @@ class VllmEngine:
         return {
             "state": self._state,
             "error": self._error,
-            "backend": "qwen-asr-streaming" if self.settings.engine_variant == "qwen" else "vllm-realtime",
+            "backend": "qwen-asr-streaming",
             "variant": self.settings.engine_variant,
             "model": self.settings.model_name,
             "model_path": self.settings.model_id,
@@ -460,9 +364,7 @@ class VllmEngine:
     async def open_session(self) -> RealtimeSession:
         if self._state != "ready":
             raise EngineNotReady(self._error or f"model is {self._state}")
-        if self.settings.engine_variant == "qwen":
-            return await QwenSdkRealtimeSession.open(self.settings)
-        return await VllmRealtimeSession.open(self.settings)
+        return await QwenSdkRealtimeSession.open(self.settings)
 
     async def transcribe_file(
         self,
