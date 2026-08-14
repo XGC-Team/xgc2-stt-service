@@ -113,6 +113,8 @@ jobs:
           python-version: "3.12"
       - name: Run desktop source tests
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libportaudio2
           uv sync --frozen --extra dev --extra desktop
           uv run ruff check src tests
           uv run pytest tests/test_desktop_support.py tests/test_desktop_audio.py
@@ -223,11 +225,10 @@ jobs:
           SOURCE_SHA: ${{ needs.release-guard.outputs.source_sha }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          debs=(dist/*.deb)
-          [[ ${#debs[@]} -ge 3 ]] || {
-            echo "Expected Ubuntu 20.04/22.04/24.04 Debs, found ${#debs[@]}" >&2
-            ls -la dist >&2
+          mapfile -t debs < <(find dist -type f -name '*.deb' | LC_ALL=C sort)
+          [[ ${#debs[@]} -ge 6 ]] || {
+            echo "Expected Ubuntu 20.04/22.04/24.04 amd64/arm64 Debs, found ${#debs[@]}" >&2
+            find dist -type f >&2
             exit 1
           }
           tag="desktop-v${VERSION}"
