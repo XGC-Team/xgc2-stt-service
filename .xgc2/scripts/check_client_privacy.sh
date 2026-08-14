@@ -13,7 +13,12 @@ scan_text() {
   local target="$1"
   local status
   set +e
-  LC_ALL=C rg -a -q -i -- "${forbidden_regex}" "${target}"
+  if command -v rg >/dev/null 2>&1; then
+    LC_ALL=C rg -a -q -i -- "${forbidden_regex}" "${target}"
+  else
+    # Distro build containers and GitHub-hosted runners may not ship ripgrep.
+    LC_ALL=C grep -RaEq -i -- "${forbidden_regex}" "${target}"
+  fi
   status=$?
   set -e
   case "${status}" in
