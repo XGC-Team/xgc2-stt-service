@@ -61,10 +61,9 @@ jobs:
       image: ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0
     steps:
       - uses: actions/checkout@v4
-      - name: Use image toolchains
-        run: echo /usr/local/bin >> "$GITHUB_PATH"
       - name: Run mandatory source and package gates
         run: |
+          export PATH="/usr/local/bin:/usr/local/go/bin:/usr/local/cargo/bin:${PATH}"
           uv sync --frozen --extra dev --extra desktop
           uv run ruff check src tests
           uv run pytest
