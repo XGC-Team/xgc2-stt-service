@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create or verify an xgc2.build-artifact.v1 manifest."""
+"""Create or verify an xgc2.build-artifact.v2 manifest."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA = "xgc2.build-artifact.v1"
+SCHEMA = "xgc2.build-artifact.v2"
 SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 
 
