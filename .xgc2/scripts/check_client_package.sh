@@ -20,6 +20,7 @@ required=(
   src/xgc2_stt/desktop_audio.py
   src/xgc2_stt/desktop_cli.py
   src/xgc2_stt/desktop_support.py
+  tests/test_artifact_manifest.py
   .github/workflows/client-deb.yml
   .github/workflows/client-deb-ci.yml
 )
@@ -35,6 +36,22 @@ for script in .xgc2/scripts/*.sh; do bash -n "${script}"; done
 [[ "$(awk -F': *' '/^id:/ {print $2; exit}' .xgc2/product.yml)" == xgc2-stt-client ]]
 product_version="$(awk -F': *' '/^version:/ {print $2; exit}' .xgc2/product.yml)"
 [[ "${product_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+-[1-9][0-9]*$ ]]
+python3 - .xgc2/product.yml <<'PY'
+import sys
+
+import yaml
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    product = yaml.safe_load(stream)
+apt = product.get("apt", {})
+package = "xgc2-stt-client"
+if apt.get("distribution") != "focal,jammy,noble":
+    raise SystemExit("product.yml apt.distribution must declare focal,jammy,noble")
+if apt.get("package_architectures") != {package: ["amd64", "arm64"]}:
+    raise SystemExit("product.yml package_architectures must declare both architectures")
+if apt.get("package_distributions") != {package: ["focal", "jammy", "noble"]}:
+    raise SystemExit("product.yml package_distributions must declare all three distributions")
+PY
 for distro in focal jammy noble; do
   distro_version="$(awk -F': *' -v distro="${distro}" '
     /^[[:space:]]+apt_versions:/ { seen = 1; next }
@@ -49,6 +66,9 @@ grep -Fq 'Exec=xgc2-stt-client' .xgc2/desktop/xgc2-stt-client.desktop
 grep -Fq '<binary>xgc2-stt-client</binary>' .xgc2/desktop/io.xgc2.stt-client.metainfo.xml
 grep -Fq 'xgc2-stt-client = "xgc2_stt.desktop_cli:main"' pyproject.toml
 grep -Fq "CLIENT_VERSION = \"${product_version%-*}\"" src/xgc2_stt/desktop_support.py
+grep -Fq "xgc2-stt-client_${product_version}_amd64.ubuntu-22.04.deb" README.md
+grep -Fq 'BUILD_FIELDS' .xgc2/scripts/xgc2_artifact_manifest.py
+grep -Fq 'set(manifest) != BUILD_FIELDS' .xgc2/scripts/xgc2_artifact_manifest.py
 grep -Fq 'gi.require_version("Gtk", "3.0")' src/xgc2_stt/desktop.py
 grep -Fq 'AyatanaAppIndicator3' src/xgc2_stt/desktop.py
 if grep -Eq 'PySide6|pynput|PyInstaller|QT_QPA_PLATFORM' src/xgc2_stt/desktop.py src/xgc2_stt/desktop_cli.py src/xgc2_stt/desktop_support.py; then

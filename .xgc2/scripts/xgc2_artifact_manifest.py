@@ -15,6 +15,19 @@ from typing import Any
 
 SCHEMA = "xgc2.build-artifact.v1"
 SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+BUILD_FIELDS = {
+    "schema",
+    "product",
+    "version",
+    "distribution",
+    "architecture",
+    "source_sha",
+    "ci",
+    "created_at",
+    "debs",
+}
+CI_FIELDS = {"run_id", "workflow", "workflow_ref"}
+DEB_FIELDS = {"file", "package", "version", "architecture", "sha256", "size"}
 
 
 def digest(path: Path) -> str:
@@ -97,6 +110,10 @@ def verify(args: argparse.Namespace) -> None:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
+        if not isinstance(manifest, dict) or manifest.get("schema") != SCHEMA:
+            continue
+        if set(manifest) != BUILD_FIELDS:
+            raise ValueError(f"{manifest_path}: build manifest fields are not exact")
         expected = {
             "schema": SCHEMA,
             "product": args.product,
@@ -107,10 +124,27 @@ def verify(args: argparse.Namespace) -> None:
         }
         if not all(manifest.get(key) == value for key, value in expected.items()):
             continue
+        ci = manifest.get("ci")
+        if not isinstance(ci, dict) or set(ci) != CI_FIELDS or not all(ci.values()):
+            raise ValueError(f"{manifest_path}: CI identity is not exact")
+        created_at = manifest.get("created_at")
+        if not isinstance(created_at, str) or not created_at.endswith("Z"):
+            raise ValueError(f"{manifest_path}: created_at is not UTC")
+        try:
+            timestamp = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError(f"{manifest_path}: created_at is invalid") from error
+        if timestamp.utcoffset() != timezone.utc.utcoffset(timestamp):
+            raise ValueError(f"{manifest_path}: created_at is not UTC")
         entries = manifest.get("debs")
         if not isinstance(entries, list) or len(entries) != 1:
             raise ValueError(f"{manifest_path}: expected one Deb entry")
-        candidate = list(root.rglob(str(entries[0].get("file", ""))))
+        if not isinstance(entries[0], dict) or set(entries[0]) != DEB_FIELDS:
+            raise ValueError(f"{manifest_path}: Deb fields are not exact")
+        filename = entries[0].get("file")
+        if not isinstance(filename, str) or Path(filename).name != filename:
+            raise ValueError(f"{manifest_path}: unsafe Deb filename")
+        candidate = list(root.rglob(filename))
         if len(candidate) != 1 or deb_entry(candidate[0]) != entries[0]:
             raise ValueError(f"{manifest_path}: Deb identity mismatch")
         matches.append((manifest_path, candidate[0]))

@@ -177,7 +177,7 @@ There is no APT repository.
 
 ```bash
 # Example: Ubuntu 22.04 amd64. Use ubuntu-20.04 or ubuntu-24.04 as needed.
-sudo apt install ./xgc2-stt-client_0.2.1-2_amd64.ubuntu-22.04.deb
+sudo apt install ./xgc2-stt-client_0.2.1-3_amd64.ubuntu-22.04.deb
 xgc2-stt-client
 ```
 

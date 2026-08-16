@@ -25,6 +25,7 @@ on:
       - "tests/test_desktop_audio.py"
       - "tests/test_desktop_cli.py"
       - "tests/test_engine.py"
+      - "tests/test_artifact_manifest.py"
       - "tests/test_docker_image_workflow_contract.py"
       - "tests/test_client_privacy_gate.py"
   pull_request:
@@ -50,6 +51,7 @@ on:
       - "tests/test_desktop_audio.py"
       - "tests/test_desktop_cli.py"
       - "tests/test_engine.py"
+      - "tests/test_artifact_manifest.py"
       - "tests/test_docker_image_workflow_contract.py"
       - "tests/test_client_privacy_gate.py"
   workflow_dispatch:
