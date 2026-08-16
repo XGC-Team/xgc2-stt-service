@@ -66,7 +66,12 @@ grep -Fq 'Exec=xgc2-stt-client' .xgc2/desktop/xgc2-stt-client.desktop
 grep -Fq '<binary>xgc2-stt-client</binary>' .xgc2/desktop/io.xgc2.stt-client.metainfo.xml
 grep -Fq 'xgc2-stt-client = "xgc2_stt.desktop_cli:main"' pyproject.toml
 grep -Fq "CLIENT_VERSION = \"${product_version%-*}\"" src/xgc2_stt/desktop_support.py
-grep -Fq "xgc2-stt-client_${product_version}_amd64.ubuntu-22.04.deb" README.md
+grep -Fq 'sudo apt install xgc2-stt-client' README.md
+if grep -Eq 'apt install [.]?/|There is no APT repository|not through an APT repository' \
+  README.md .xgc2/product.yml; then
+  echo "Desktop installation documentation bypasses the official XGC2 APT repository." >&2
+  exit 1
+fi
 grep -Fq 'BUILD_FIELDS' .xgc2/scripts/xgc2_artifact_manifest.py
 grep -Fq 'set(manifest) != BUILD_FIELDS' .xgc2/scripts/xgc2_artifact_manifest.py
 grep -Fq 'gi.require_version("Gtk", "3.0")' src/xgc2_stt/desktop.py

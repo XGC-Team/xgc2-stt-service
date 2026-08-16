@@ -19,7 +19,7 @@ on:
         type: choice
         options: [release, compatibility-verify]
       apt_overlay_url:
-        description: Unused. Debs are published to GitHub Releases.
+        description: Reserved central release-train overlay; this leaf has no XGC2 build dependency.
         required: false
         default: ""
         type: string
@@ -223,17 +223,17 @@ jobs:
           cat >"${notes}" <<EOF
           Desktop client ${VERSION} for Ubuntu 20.04 (focal), 22.04 (jammy), and 24.04 (noble).
 
-          Download the \`.deb\` that matches your Ubuntu release and architecture, then:
+          After configuring the official XGC2 APT repository, install with:
 
           \`\`\`bash
-          sudo dpkg -i xgc2-stt-client_${VERSION}_amd64.ubuntu-22.04.deb
-          sudo apt-get install -f
+          sudo apt update
+          sudo apt install xgc2-stt-client
           xgc2-stt-client
           \`\`\`
 
-          This leaf workflow publishes GitHub Release assets only. APT
-          promotion is owned by the central release train. The package does
-          not bundle a service URL or API key.
+          GitHub Release assets mirror the build outputs. Production APT
+          promotion is owned by the central release train. The package does not
+          bundle a service URL or API key.
           Source commit: ${SOURCE_SHA}
           EOF
           if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1 || \

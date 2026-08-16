@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / ".xgc2/scripts/xgc2_artifact_manifest.py"
@@ -65,7 +64,7 @@ def test_v1_manifest_has_exact_fields_and_debian_version(tmp_path: Path, monkeyp
     assert manifest["debs"][0]["version"] == "0.2.1-3"
     created_at = datetime.fromisoformat(manifest["created_at"].replace("Z", "+00:00"))
     assert manifest["created_at"].endswith("Z")
-    assert created_at.tzinfo == timezone.utc
+    assert created_at.tzinfo == UTC
     manifest_tool.verify(args)
 
 

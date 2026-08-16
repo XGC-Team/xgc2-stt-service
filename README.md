@@ -171,22 +171,19 @@ run, open Settings and provide:
 - optional Auto Enter and **Start at login** (off by default; writes or
   removes `~/.config/autostart/xgc2-stt-client.desktop`).
 
-Download the `.deb` that matches your Ubuntu release from
-[GitHub Releases](https://github.com/XGC-Team/xgc2-stt-service/releases).
-There is no APT repository.
+After configuring the official XGC2 APT repository, install the package for
+your Ubuntu release and architecture through APT:
 
 ```bash
-# Example: Ubuntu 22.04 amd64. Use ubuntu-20.04 or ubuntu-24.04 as needed.
-sudo apt install ./xgc2-stt-client_0.2.1-3_amd64.ubuntu-22.04.deb
+sudo apt update
+sudo apt install xgc2-stt-client
 xgc2-stt-client
 ```
 
-`apt install ./…deb` resolves `Depends` (`python3-websocket`, `python3-pyaudio`,
-`python3-xlib`, GTK). `python3-sounddevice` is recommended on Ubuntu 22.04+ only.
-`dpkg -i` alone will leave the package unconfigured; if
-you already did that, run `sudo apt-get install -f`.
+APT resolves `Depends` (`python3-websocket`, `python3-pyaudio`, `python3-xlib`,
+GTK). `python3-sounddevice` is recommended on Ubuntu 22.04+ only.
 
-CI also uploads the same artifacts from the Desktop client Deb workflows.
+CI also uploads the same build artifacts for central release-train verification.
 For source development:
 
 ```bash

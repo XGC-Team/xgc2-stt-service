@@ -27,9 +27,11 @@ apt:
   - xclip
   - xdotool
 usage:
-  install: 'Download the Ubuntu matching .deb from GitHub Releases, then:
+  install: 'After configuring the official XGC2 APT repository:
 
-    sudo apt install ./xgc2-stt-client_0.2.1-3_amd64.ubuntu-22.04.deb
+    sudo apt update
+
+    sudo apt install xgc2-stt-client
 
     '
   smoke_test: 'dpkg-query -W xgc2-stt-client
@@ -39,8 +41,8 @@ usage:
     '
   notes: The package contains no service URL, API key, private registry, or network port.
     On first launch, the user supplies an endpoint operated by themselves or their organization.
-    Autostart is a Settings option and is not enabled by package installation. Debs are
-    published on GitHub Releases, not through an APT repository.
+    Autostart is a Settings option and is not enabled by package installation. Production
+    installation is owned by the central XGC2 APT release train.
 ownership:
   paths:
   - /usr/bin/xgc2-stt-client
