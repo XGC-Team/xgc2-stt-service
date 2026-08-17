@@ -20,7 +20,7 @@ def deb_metadata(path: Path) -> dict[str, object]:
     return {
         "file": path.name,
         "package": "xgc2-stt-client",
-        "version": "0.2.1-3",
+        "version": "0.2.1-4~jammy",
         "architecture": "amd64",
         "sha256": "a" * 64,
         "size": path.stat().st_size,
@@ -30,7 +30,8 @@ def deb_metadata(path: Path) -> dict[str, object]:
 def arguments(root: Path) -> SimpleNamespace:
     return SimpleNamespace(
         product="xgc2-stt-client",
-        product_version="0.2.1-3",
+        product_version="0.2.1-4",
+        deb_version="0.2.1-4~jammy",
         distribution="jammy",
         architecture="amd64",
         source_sha="b" * 40,
@@ -60,8 +61,8 @@ def test_v1_manifest_has_exact_fields_and_debian_version(tmp_path: Path, monkeyp
     assert set(manifest) == manifest_tool.BUILD_FIELDS
     assert set(manifest["ci"]) == manifest_tool.CI_FIELDS
     assert set(manifest["debs"][0]) == manifest_tool.DEB_FIELDS
-    assert manifest["version"] == "0.2.1-3"
-    assert manifest["debs"][0]["version"] == "0.2.1-3"
+    assert manifest["version"] == "0.2.1-4"
+    assert manifest["debs"][0]["version"] == "0.2.1-4~jammy"
     created_at = datetime.fromisoformat(manifest["created_at"].replace("Z", "+00:00"))
     assert manifest["created_at"].endswith("Z")
     assert created_at.tzinfo == UTC
@@ -83,3 +84,30 @@ def test_verifier_rejects_non_exact_v1_fields(tmp_path: Path, monkeypatch) -> No
 
     with pytest.raises(ValueError, match="build manifest fields are not exact"):
         manifest_tool.verify(args)
+
+
+def test_generator_rejects_deb_version_outside_distribution_scope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    deb_dir = tmp_path / "debs"
+    deb_dir.mkdir()
+    (deb_dir / "xgc2-stt-client.deb").write_bytes(b"deb")
+    monkeypatch.setattr(manifest_tool, "deb_entry", deb_metadata)
+
+    args = arguments(tmp_path)
+    args.deb_version = "0.2.1-4~focal"
+    with pytest.raises(ValueError, match="Debian version must be '0.2.1-4~jammy'"):
+        manifest_tool.build(args)
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        ".github/workflows/client-deb-ci.yml",
+        ".github/workflows/client-deb.yml",
+    ],
+)
+def test_workflows_bind_manifest_to_distribution_scoped_deb_version(workflow: str) -> None:
+    text = (ROOT / workflow).read_text(encoding="utf-8")
+    assert 'deb_version="${version}~${{ matrix.distribution }}"' in text
+    assert '--deb-version "$deb_version"' in text

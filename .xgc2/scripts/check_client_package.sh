@@ -57,8 +57,9 @@ for distro in focal jammy noble; do
     /^[[:space:]]+apt_versions:/ { seen = 1; next }
     seen && $1 ~ "^[[:space:]]+" distro "$" { print $2; exit }
   ' .xgc2/product.yml)"
-  [[ "${distro_version}" == "${product_version}" ]] || {
-    echo "product.yml apt_versions.${distro} must match version ${product_version}" >&2
+  expected_distro_version="${product_version}~${distro}"
+  [[ "${distro_version}" == "${expected_distro_version}" ]] || {
+    echo "product.yml apt_versions.${distro} must be ${expected_distro_version}" >&2
     exit 1
   }
 done
@@ -87,6 +88,10 @@ grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0' .github/workflows/cli
 grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-stt-dev:1.0.0' .github/workflows/client-deb-ci.yml
 grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-build-noble-dev:1.0.0' .github/workflows/client-deb.yml
 grep -Fq 'ghcr.io/xgc-team/xgc2-images/xgc2-build-focal-dev:1.0.0' .github/workflows/client-deb-ci.yml
+for workflow in .github/workflows/client-deb.yml .github/workflows/client-deb-ci.yml; do
+  grep -Fq 'deb_version="${version}~${{ matrix.distribution }}"' "${workflow}"
+  grep -Fq -- '--deb-version "$deb_version"' "${workflow}"
+done
 if grep -Eq 'run_cpp_quality|run_source_tests|--clobber|gh release upload' \
   .github/workflows/client-deb.yml; then
   echo "Desktop release workflow contains a bypass or overwrite path." >&2

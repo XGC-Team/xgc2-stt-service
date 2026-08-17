@@ -184,6 +184,10 @@ APT resolves `Depends` (`python3-websocket`, `python3-pyaudio`, `python3-xlib`,
 GTK). `python3-sounddevice` is recommended on Ubuntu 22.04+ only.
 
 CI also uploads the same build artifacts for central release-train verification.
+The product release revision is shared across Ubuntu releases, while each Deb
+uses a distribution-scoped immutable version (`<revision>~focal`,
+`<revision>~jammy`, or `<revision>~noble`). This prevents different
+distribution payloads from sharing one Debian package identity.
 For source development:
 
 ```bash

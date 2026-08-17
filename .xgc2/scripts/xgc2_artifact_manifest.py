@@ -15,6 +15,7 @@ from typing import Any
 
 SCHEMA = "xgc2.build-artifact.v1"
 SHA = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
+VERSION = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.+:~_-]{0,255}$")
 BUILD_FIELDS = {
     "schema",
     "product",
@@ -64,6 +65,13 @@ def identity(args: argparse.Namespace) -> None:
         raise ValueError("unsupported distribution or architecture")
     if not SHA.fullmatch(args.source_sha):
         raise ValueError("source_sha must contain 40 or 64 lowercase hex characters")
+    if not VERSION.fullmatch(args.product_version):
+        raise ValueError("product_version must be a valid Debian version")
+    expected_deb_version = f"{args.product_version}~{args.distribution}"
+    if args.deb_version != expected_deb_version:
+        raise ValueError(
+            f"Debian version must be {expected_deb_version!r} for {args.distribution}"
+        )
 
 
 def build(args: argparse.Namespace) -> None:
@@ -72,7 +80,7 @@ def build(args: argparse.Namespace) -> None:
     if len(debs) != 1:
         raise ValueError("expected exactly one Deb")
     entry = deb_entry(debs[0])
-    expected_version = args.product_version
+    expected_version = args.deb_version
     if entry["package"] != args.product or entry["version"] != expected_version:
         raise ValueError("Deb product or version does not match requested identity")
     if entry["architecture"] != args.architecture:
@@ -141,6 +149,12 @@ def verify(args: argparse.Namespace) -> None:
             raise ValueError(f"{manifest_path}: expected one Deb entry")
         if not isinstance(entries[0], dict) or set(entries[0]) != DEB_FIELDS:
             raise ValueError(f"{manifest_path}: Deb fields are not exact")
+        if (
+            entries[0].get("package") != args.product
+            or entries[0].get("version") != args.deb_version
+            or entries[0].get("architecture") != args.architecture
+        ):
+            raise ValueError(f"{manifest_path}: Deb product/version/architecture mismatch")
         filename = entries[0].get("file")
         if not isinstance(filename, str) or Path(filename).name != filename:
             raise ValueError(f"{manifest_path}: unsafe Deb filename")
@@ -162,7 +176,14 @@ def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser()
     commands = result.add_subparsers(required=True)
     common = argparse.ArgumentParser(add_help=False)
-    for name in ("product", "product_version", "distribution", "architecture", "source_sha"):
+    for name in (
+        "product",
+        "product_version",
+        "deb_version",
+        "distribution",
+        "architecture",
+        "source_sha",
+    ):
         common.add_argument(f"--{name.replace('_', '-')}", dest=name, required=True)
     create = commands.add_parser("build", parents=[common])
     create.add_argument("--deb-dir", required=True)

@@ -31,7 +31,16 @@ case "${architecture}" in amd64|arm64) ;; *) echo "Only amd64 and arm64 are supp
   exit 1
 }
 
-package_version="$(awk -F': *' '/^version:/ {print $2; exit}' "${repo_root}/.xgc2/product.yml")"
+product_version="$(awk -F': *' '/^version:/ {print $2; exit}' "${repo_root}/.xgc2/product.yml")"
+package_version="$(awk -F': *' -v distro="${distribution}" '
+  /^[[:space:]]+apt_versions:/ { seen = 1; next }
+  seen && $1 ~ "^[[:space:]]+" distro "$" { print $2; exit }
+' "${repo_root}/.xgc2/product.yml")"
+expected_package_version="${product_version}~${distribution}"
+if [[ "${package_version}" != "${expected_package_version}" ]]; then
+  echo "release.apt_versions.${distribution} must be ${expected_package_version}; found ${package_version:-<missing>}." >&2
+  exit 1
+fi
 work_dir="$(mktemp -d)"
 cleanup() { rm -rf -- "${work_dir}"; }
 trap cleanup EXIT

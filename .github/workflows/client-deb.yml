@@ -170,11 +170,14 @@ jobs:
       - name: Create release-train build manifest
         run: |
           install -d .ci/build-manifests
+          version="${{ needs.release-guard.outputs.version }}"
+          deb_version="${version}~${{ matrix.distribution }}"
           python3 .xgc2/scripts/xgc2_artifact_manifest.py build \
             --deb-dir debs \
             --output-dir .ci/build-manifests \
             --product xgc2-stt-client \
-            --product-version "${{ needs.release-guard.outputs.version }}" \
+            --product-version "$version" \
+            --deb-version "$deb_version" \
             --distribution "${{ matrix.distribution }}" \
             --architecture "${{ matrix.architecture }}" \
             --source-sha "${{ needs.release-guard.outputs.source_sha }}" \
