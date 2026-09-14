@@ -4,30 +4,6 @@ name: Desktop client Deb CI
 on:
   push:
     branches: [main]
-    paths:
-      - ".xgc2/**"
-      - ".github/workflows/client-deb-ci.yml"
-      - ".github/workflows/client-deb.yml"
-      - ".github/workflows/review.yml"
-      - ".gitignore"
-      - "LICENSE"
-      - "README.md"
-      - "THIRD_PARTY_NOTICES.md"
-      - "pyproject.toml"
-      - "uv.lock"
-      - "src/xgc2_stt/__init__.py"
-      - "src/xgc2_stt/desktop.py"
-      - "src/xgc2_stt/desktop_audio.py"
-      - "src/xgc2_stt/desktop_cli.py"
-      - "src/xgc2_stt/desktop_support.py"
-      - "src/xgc2_stt/engine.py"
-      - "tests/test_desktop_support.py"
-      - "tests/test_desktop_audio.py"
-      - "tests/test_desktop_cli.py"
-      - "tests/test_engine.py"
-      - "tests/test_artifact_manifest.py"
-      - "tests/test_docker_image_workflow_contract.py"
-      - "tests/test_client_privacy_gate.py"
   pull_request:
     branches: [main]
     paths:
