@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / ".xgc2" / "scripts" / "check_client_privacy.sh"
+PROBE_HOST = "192.168.0.1"
 
 
 def test_privacy_gate_fails_closed_when_scanner_errors(tmp_path: Path) -> None:
@@ -28,13 +29,14 @@ def test_privacy_gate_fails_closed_when_scanner_errors(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "Privacy scan failed" in result.stderr
-    assert "xiaokang" not in result.stdout + result.stderr
+    assert PROBE_HOST not in result.stdout + result.stderr
 
 
 def test_privacy_gate_scans_deb_control_metadata(tmp_path: Path) -> None:
     package_root = tmp_path / "package"
     control_root = package_root / "DEBIAN"
     control_root.mkdir(parents=True)
+    probe_url = f"http://{PROBE_HOST}:8080"
     (control_root / "control").write_text(
         "\n".join(
             [
@@ -42,7 +44,7 @@ def test_privacy_gate_scans_deb_control_metadata(tmp_path: Path) -> None:
                 "Version: 1.0-1",
                 "Architecture: all",
                 "Maintainer: Test <test@example.invalid>",
-                "Description: xiaokang.ink must never enter control metadata",
+                f"Description: {probe_url} must never enter control metadata",
                 "",
             ]
         ),
@@ -61,4 +63,23 @@ def test_privacy_gate_scans_deb_control_metadata(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "Private or deployment-specific endpoint data" in result.stderr
-    assert "xiaokang" not in result.stdout + result.stderr
+    assert PROBE_HOST not in result.stdout + result.stderr
+
+
+def test_privacy_gate_source_mode_accepts_tracked_tree() -> None:
+    result = subprocess.run(
+        [str(SCRIPT), "source"],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert PROBE_HOST not in result.stdout + result.stderr
+
+
+def test_privacy_checker_does_not_exempt_itself() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "ls-files" in text
+    assert 'check_client_privacy.sh"' not in text

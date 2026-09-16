@@ -5,10 +5,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
 mode="${1:-source}"
 
-# Block deployment values from this workspace. Generic examples shipped in
-# third-party license/metadata files (for example localhost:8765) aren't a
-# configured endpoint and are intentionally outside this denylist.
-forbidden_regex='xiaokang\.ink|10\.10\.10\.[0-9]+|(:|%3A)(34896|34897)([^0-9]|$)|crpi-[[:alnum:]]+\.'
+# Generic leak classes for this public repository. Loopback examples such as
+# 127.0.0.1 remain allowed. Operator-specific hostnames, networks, ports, and
+# registry instance IDs are not stored here.
+forbidden_regex='(://|%3A%2F%2F)(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.[0-9]{1,3}\.[0-9]{1,3})'
+
 scan_text() {
   local target="$1"
   local status
@@ -34,22 +35,31 @@ scan_text() {
   esac
 }
 
+scan_tracked_public_tree() {
+  local rel path count=0
+  git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+    echo "source scan requires a git checkout." >&2
+    return 2
+  }
+  while IFS= read -r -d '' rel; do
+    path="${repo_root}/${rel}"
+    [[ -f "${path}" ]] || continue
+    count=$((count + 1))
+    scan_text "${path}" || return $?
+  done < <(
+    git -C "${repo_root}" ls-files -z -- . \
+      ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.webp' ':!*.ico' \
+      ':!uv.lock' ':!**/package-lock.json' ':!*.pyc'
+  )
+  [[ "${count}" -gt 0 ]] || {
+    echo "source scan found no tracked public files." >&2
+    return 2
+  }
+}
+
 case "${mode}" in
   source)
-    scan_text "${repo_root}/src/xgc2_stt/desktop.py"
-    scan_text "${repo_root}/src/xgc2_stt/desktop_audio.py"
-    scan_text "${repo_root}/src/xgc2_stt/desktop_cli.py"
-    scan_text "${repo_root}/src/xgc2_stt/desktop_support.py"
-    scan_text "${repo_root}/README.md"
-    scan_text "${repo_root}/THIRD_PARTY_NOTICES.md"
-    scan_text "${repo_root}/.xgc2/desktop"
-    scan_text "${repo_root}/.xgc2/product.yml"
-    scan_text "${repo_root}/.github/workflows/client-deb.yml"
-    scan_text "${repo_root}/.github/workflows/client-deb-ci.yml"
-    for source_file in "${repo_root}"/.xgc2/scripts/*; do
-      [[ "${source_file}" == "${repo_root}/.xgc2/scripts/check_client_privacy.sh" ]] || \
-        scan_text "${source_file}"
-    done
+    scan_tracked_public_tree
     python3 - "${repo_root}/src/xgc2_stt/desktop_support.py" <<'PY'
 import ast
 import sys
