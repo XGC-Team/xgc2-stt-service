@@ -14,6 +14,7 @@ from typing import Any
 
 from aiohttp import WSMsgType, web
 from opencc import OpenCC
+from xgc2_xrpc import BoundedWebSocketResponse
 
 from .engine import EngineNotReady, SpeechEngine
 
@@ -83,8 +84,13 @@ class NativeStreamSocket:
     def __init__(self, request: web.Request):
         self.request = request
         self.query_params = request.query
-        self.native = web.WebSocketResponse(
-            max_msg_size=160_000, receive_timeout=30, heartbeat=10, timeout=2, compress=False
+        self.native = BoundedWebSocketResponse(
+            max_msg_size=160_000,
+            max_receive_bytes=52_461_568,
+            max_send_bytes=1_048_576,
+            receive_timeout=30,
+            heartbeat=10,
+            timeout=2,
         )
 
     async def accept(self) -> None:

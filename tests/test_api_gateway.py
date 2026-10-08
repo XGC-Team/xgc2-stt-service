@@ -4,7 +4,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from native_client import TestClient
+from native_client import TestClient, WebSocketDisconnect
 from test_api import FakeEngine, settings
 from xgc2_xrpc import Runtime
 
@@ -73,5 +73,54 @@ def test_two_hosts_share_runtime_connection_budget(tmp_path: Path) -> None:
             ):
                 third.get(web.origin + "/healthz")
             assert runtime.connections == 2
+    finally:
+        runtime.close()
+
+
+def test_api_websocket_cumulative_input_budget_closes_and_releases_domain(tmp_path: Path) -> None:
+    runtime = Runtime.from_environment(
+        {}, defaults={"MAX_REQUEST_BYTES": 400, "MAX_RESPONSE_BYTES": 2048}
+    )
+    engine = FakeEngine()
+    app = create_app(settings(tmp_path), engine)
+    pcm = (1000).to_bytes(2, "little", signed=True) * 150
+    try:
+        with TestClient(app, runtime=runtime), TestClient(app[API_APP_KEY], runtime=runtime) as api:
+            with api.websocket_connect("/v1/audio/transcriptions/stream") as socket:
+                assert socket.receive_json()["type"] == "session.started"
+                socket.send_bytes(pcm)
+                assert socket.receive_json()["type"] == "transcript.partial"
+                socket.send_bytes(pcm)
+                with pytest.raises(WebSocketDisconnect) as error:
+                    socket.receive_json()
+                assert error.value.code == 1009
+            assert len(engine.sessions) == 1
+            assert bytes(engine.sessions[0].pcm) == pcm
+            assert engine.sessions[0].closed
+            assert runtime.calls == 0
+    finally:
+        runtime.close()
+
+
+def test_management_websocket_cumulative_output_budget_cannot_report_unbounded_success(tmp_path: Path) -> None:
+    runtime = Runtime.from_environment(
+        {}, defaults={"MAX_REQUEST_BYTES": 16_000, "MAX_RESPONSE_BYTES": 800}
+    )
+    engine = FakeEngine()
+    app = create_app(settings(tmp_path), engine)
+    try:
+        with TestClient(app, runtime=runtime) as web:
+            with web.websocket_connect("/v1/audio/transcriptions/stream") as socket:
+                assert socket.receive_json()["type"] == "session.started"
+                for _ in range(8):
+                    socket.send_bytes((1000).to_bytes(2, "little", signed=True) * 150)
+                    try:
+                        assert socket.receive_json()["type"] == "transcript.partial"
+                    except WebSocketDisconnect:
+                        break
+                else:
+                    pytest.fail("response byte budget did not terminate the native stream")
+            assert engine.sessions[0].closed
+            assert runtime.calls == 0
     finally:
         runtime.close()
