@@ -20,6 +20,7 @@ required=(
   src/xgc2_stt/desktop_audio.py
   src/xgc2_stt/desktop_cli.py
   src/xgc2_stt/desktop_support.py
+  src/xgc2_stt/desktop_stream.py
   tests/test_artifact_manifest.py
   .github/workflows/client-deb.yml
   .github/workflows/client-deb-ci.yml

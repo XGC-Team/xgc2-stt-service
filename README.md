@@ -191,7 +191,7 @@ sudo apt install xgc2-stt-client
 xgc2-stt-client
 ```
 
-APT resolves `Depends` (`python3-websocket`, `python3-pyaudio`, `python3-xlib`,
+APT resolves `Depends` (`python3-xgc2-xrpc`, `python3-pyaudio`, `python3-xlib`,
 GTK). `python3-sounddevice` is recommended on Ubuntu 22.04+ only.
 
 CI also uploads the same build artifacts for central release-train verification.

@@ -28,7 +28,6 @@ dev = [
 ]
 desktop = [
   "python-xlib>=0.33,<1",
-  "websocket-client>=1.6,<2",
   "sounddevice==0.5.5",
 ]
 

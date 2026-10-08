@@ -71,6 +71,7 @@ install -m 0644 "${repo_root}/src/xgc2_stt/desktop.py" "${python_pkg}/desktop.py
 install -m 0644 "${repo_root}/src/xgc2_stt/desktop_audio.py" "${python_pkg}/desktop_audio.py"
 install -m 0644 "${repo_root}/src/xgc2_stt/desktop_cli.py" "${python_pkg}/desktop_cli.py"
 install -m 0644 "${repo_root}/src/xgc2_stt/desktop_support.py" "${python_pkg}/desktop_support.py"
+install -m 0644 "${repo_root}/src/xgc2_stt/desktop_stream.py" "${python_pkg}/desktop_stream.py"
 
 cat >"${pkg_root}/usr/bin/${package_name}" <<'EOF'
 #!/usr/bin/python3
@@ -101,7 +102,7 @@ Priority: optional
 Architecture: ${architecture}
 Installed-Size: ${installed_size}
 Maintainer: ${maintainer}
-Depends: python3 (>= 3.10), python3-xgc2-xrpc (>= 0.1.0), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, python3-websocket, python3-pyaudio, python3-xlib
+Depends: python3 (>= 3.10), python3-xgc2-xrpc (>= 0.1.0), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, python3-pyaudio, python3-xlib
 Recommends: gir1.2-notify-0.7, python3-sounddevice, wl-clipboard, xclip, xdotool
 Suggests: wtype, ydotool
 Description: Desktop client for a self-hosted streaming STT API
