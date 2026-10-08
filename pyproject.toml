@@ -12,14 +12,11 @@ license = { text = "MIT" }
 dependencies = [
   "xgc2-xrpc==0.1.0",
   "av>=16,<19",
-  "fastapi>=0.133,<0.137",
-  "httpx>=0.28,<0.29",
+  "aiohttp==3.14.4",
   "nvidia-ml-py>=13,<14",
   "numpy>=1.26,<3",
   "opencc-python-reimplemented>=0.1.7,<0.2",
   "pydantic-settings==2.15.0",
-  "python-multipart==0.0.32",
-  "uvicorn[standard]==0.52.1",
   "websockets>=15,<18",
 ]
 

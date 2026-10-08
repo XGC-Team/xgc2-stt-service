@@ -15,6 +15,8 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = Field(default=8000, ge=1, le=65535)
+    api_host: str = "0.0.0.0"
+    api_port: int = Field(default=8002, ge=1, le=65535)
     model_socket_path: str = "/run/xgc2-stt/model.sock"
     model_session_idle_seconds: int = Field(default=30, ge=5, le=300)
     model_session_max_seconds: int = Field(default=300, ge=10, le=1800)

@@ -56,7 +56,7 @@ COPY --from=web-builder --chown=2000:0 /build/web/dist/ /opt/xgc2-stt/web/
 
 USER 2000:0
 VOLUME ["/var/lib/xgc2-stt"]
-EXPOSE 8000
+EXPOSE 8000 8002
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1

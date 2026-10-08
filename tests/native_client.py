@@ -45,8 +45,9 @@ class NativeSocket:
 class TestClient:
     __test__ = False
 
-    def __init__(self, app: Any, **_options: Any):
-        self.runtime = Runtime(blocking_workers=2)
+    def __init__(self, app: Any, *, runtime: Runtime | None = None, **_options: Any):
+        self.owns_runtime = runtime is None
+        self.runtime = runtime or Runtime(blocking_workers=2)
         self.host = Host.from_app(
             app, address=("127.0.0.1", 0), runtime=self.runtime, limits=Limits(body_bytes=60_000_000, call_timeout=5)
         )
@@ -60,7 +61,8 @@ class TestClient:
     def __exit__(self, *_args: Any) -> None:
         self.client.close()
         self.host.close()
-        self.runtime.close()
+        if self.owns_runtime:
+            self.runtime.close()
 
     def get(self, path: str, **options: Any):
         return self.client.get(path, **options)

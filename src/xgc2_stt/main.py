@@ -22,6 +22,8 @@ from .gpu_metrics import GpuMonitor
 from .runtime_settings import ENGINE_RESTART_FIELDS, HOT_FIELDS, RuntimeSettingsStore, RuntimeTuning, settings_metadata
 from .streaming import NativeStreamSocket, handle_stream
 
+API_APP_KEY = web.AppKey("stt.api", web.Application)
+
 
 class ActiveRequestGate:
     def __init__(self, capacity: int):
@@ -385,6 +387,16 @@ def create_app(
             else web.Response(text="XGC2 STT service", content_type="text/plain")
         )
 
+    api_routes = [
+        web.get("/healthz", healthz),
+        web.get("/readyz", readyz),
+        web.get("/v1/models", models),
+        web.post("/v1/audio/transcriptions", transcriptions),
+        web.get("/v1/audio/transcriptions/stream", stream),
+    ]
+    api_router = AppRouter(client_max_size=config.max_upload_bytes + 32_768, middlewares=(cors, errors))
+    api_router.add_routes(api_routes)
+    app[API_APP_KEY] = api_router.app
     router.add_routes(
         [
             web.get("/healthz", healthz),
@@ -430,9 +442,23 @@ def main() -> int:
             "MAX_RESPONSE_BYTES": 1048576,
         },
     )
+    domain_app = create_app(settings)
     host = Host.from_app(
-        create_app(settings),
+        domain_app,
         address=(settings.host, settings.port),
+        runtime=runtime,
+        limits=Limits(
+            connections=32,
+            in_flight=16,
+            body_bytes=settings.max_upload_bytes + 32_768,
+            response_bytes=1_048_576,
+            call_timeout=1800,
+            shutdown_timeout=30,
+        ),
+    )
+    api_host = Host.from_app(
+        domain_app[API_APP_KEY],
+        address=(settings.api_host, settings.api_port),
         runtime=runtime,
         limits=Limits(
             connections=32,
@@ -448,10 +474,12 @@ def main() -> int:
         signal.signal(sig, lambda _sig, _frame: runtime.loop.call_soon_threadsafe(stop.set))
 
     async def serve() -> None:
-        await host.start_async()
         try:
+            await host.start_async()
+            await api_host.start_async()
             await stop.wait()
         finally:
+            await api_host.close_async()
             await host.close_async()
 
     try:
