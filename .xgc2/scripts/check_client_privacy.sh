@@ -37,7 +37,7 @@ scan_text() {
 
 scan_tracked_public_tree() {
   local rel path count=0
-  git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
+  git -c safe.directory="${repo_root}" -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1 || {
     echo "source scan requires a git checkout." >&2
     return 2
   }
@@ -47,7 +47,7 @@ scan_tracked_public_tree() {
     count=$((count + 1))
     scan_text "${path}" || return $?
   done < <(
-    git -C "${repo_root}" ls-files -z -- . \
+    git -c safe.directory="${repo_root}" -C "${repo_root}" ls-files -z -- . \
       ':!*.png' ':!*.jpg' ':!*.jpeg' ':!*.gif' ':!*.webp' ':!*.ico' \
       ':!uv.lock' ':!**/package-lock.json' ':!*.pyc'
   )

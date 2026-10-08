@@ -38,6 +38,7 @@ The desktop recording Runtime is created once by the tray composition root and i
 - Desktop Debian metadata requires Python >= 3.10 and `python3-xgc2-xrpc (>= 0.1.0)`. Focal/Jammy/Noble matrices are preserved. Focal's current system Python 3.8 is an explicit unresolved release/runtime gate; the build rejects it. Root/SDK owner must supply an approved runtime/package plan, without a local PPA or an EOL aiohttp workaround.
 - Management/API Hosts each have 32-connection and 16-request ceilings; the shared SDK Runtime also bounds their combined active connections/requests to 32/16. Actual dual-Host tests prove shared request admission, route separation, auth, upload, WebSocket and key usage. Both external ports 34896/34897 map to 8000/8002 in the single `stt` container. Startup/termination now couples both API surfaces to the model process. The retired API container must be removed during the Root deployment window; no running deployment is altered here.
 - SDK wheel/deb publication and a refreshed dependency lock, image ABI, real GPU inference/load/unload, two-end restart, managed volume/cache allocation, desktop UI smoke and actual APT deployment are not established here. All deployments remain paused.
+- `.xgc2/scripts/check_client_package.sh` and its privacy check use command-local Git trust configuration. The actual source/package-input gate passes without modifying global Git configuration; this does not build, install or smoke a frozen SDK/Deb runtime.
 
 ## Reproduction
 

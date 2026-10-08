@@ -104,8 +104,7 @@ if grep -Eq 'astral-sh/setup-uv|actions/setup-node|ubuntu:20\.04|ubuntu:22\.04|u
   exit 1
 fi
 ./.xgc2/scripts/check_client_privacy.sh source
-git config --global --add safe.directory "${repo_root}"
-if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if ! git -c safe.directory="${repo_root}" -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "Workspace is not a Git checkout: ${repo_root}" >&2
   ls -la "${repo_root}/.git" >&2 || true
   if [[ -f "${repo_root}/.git" ]]; then
@@ -113,5 +112,5 @@ if ! git -C "${repo_root}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   fi
   exit 1
 fi
-git -C "${repo_root}" diff --check
+git -c safe.directory="${repo_root}" -C "${repo_root}" diff --check
 echo "Client package compliance passed."

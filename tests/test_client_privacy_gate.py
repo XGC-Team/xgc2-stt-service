@@ -83,3 +83,17 @@ def test_privacy_checker_does_not_exempt_itself() -> None:
     text = SCRIPT.read_text(encoding="utf-8")
     assert "ls-files" in text
     assert 'check_client_privacy.sh"' not in text
+
+
+def test_package_source_gate_preserves_global_git_configuration(tmp_path: Path) -> None:
+    global_config = tmp_path / "gitconfig"
+    before = b'[user]\n\tname = isolated owner\n[safe]\n\tdirectory = /existing-grant\n'
+    global_config.write_bytes(before)
+    environment = os.environ.copy()
+    environment["GIT_CONFIG_GLOBAL"] = str(global_config)
+    result = subprocess.run(
+        [str(ROOT / ".xgc2/scripts/check_client_package.sh")], cwd=ROOT, env=environment,
+        check=False, capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert global_config.read_bytes() == before
