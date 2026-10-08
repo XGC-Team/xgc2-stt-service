@@ -663,7 +663,7 @@ class ClientController:
             self.settings,
             owner=self._streams,
             dispatch=_ui,
-            on_connected=self._start_audio,
+            on_connected=lambda: self._start_audio(worker),
             on_hypothesis=self._inject_hypothesis,
             on_state=self._stream_state,
             on_segment=self._commit_segment,
@@ -676,8 +676,8 @@ class ClientController:
         except Exception as exc:
             self._stream_failed(str(exc))
 
-    def _start_audio(self) -> None:
-        if self.worker is None:
+    def _start_audio(self, worker: StreamingWorker) -> None:
+        if self._shutting_down or self.worker is not worker or self.state != "connecting":
             return
         try:
             self.capture = AudioCapture(self.worker.feed, self.worker.fail)

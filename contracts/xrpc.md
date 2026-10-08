@@ -31,6 +31,8 @@ The container volume is the existing state allocation; this source change does n
 
 The desktop recording Runtime is created once by the tray composition root and is distinct from local IPC's 1-KiB control budgets. It admits one outbound recording/reference/connection, with the same finite 30-minute call, 52,461,568-byte upload, 1-MiB response and 160,000-byte message bounds. This is not a combined two-Runtime budget claim. GUI callbacks use the existing main-loop dispatch. Audio overload raises instead of dropping samples, and cancellation/completion retain the recording slot until the actual native task and cleanup end. Failed native cleanup keeps the slot, stops capture and keeps the UI finalizing; explicit shutdown retries cleanup and cannot quit successfully while ownership remains. Sequential recordings reuse the SDK Runtime without creating another transport thread.
 
+Delayed GUI connection callbacks are bound to the current worker and can open capture only while connecting and outside shutdown. Native PING/PONG frames are handled separately from JSON domain events; the fixed sender/receiver serialize SDK writes with at most one bounded waiter. Real SDK tests accelerate the existing heartbeat and await a controlled slow finish. The same fixture fails with the previous desktop event consumer and passes after control-frame handling; no native GTK session or microphone is opened by controller state tests.
+
 ## Deployment inputs and remaining gates
 
 - Runtime image must provide `xgc2-xrpc==0.1.0`, `aiohttp==3.14.4`, its HTTPX/httpcore dependencies, and the existing `qwen-asr[vllm]==0.0.6` runtime. Docker build imports and checks the SDK instead of relying on `pip --no-deps` to supply it.

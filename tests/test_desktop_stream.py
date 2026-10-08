@@ -12,9 +12,10 @@ import aiohttp
 import pytest
 from aiohttp import web
 from native_client import TestClient
-from test_api import FakeEngine, settings
+from test_api import FakeEngine, FakeRealtimeSession, settings
 from xgc2_xrpc import BoundedWebSocketResponse, Runtime
 
+from xgc2_stt import streaming
 from xgc2_stt.desktop_stream import DesktopStreams, StreamingWorker
 from xgc2_stt.desktop_support import DesktopSettings
 from xgc2_stt.main import create_app
@@ -242,3 +243,49 @@ def test_desktop_wss_requires_trusted_certificate_and_matching_hostname(tmp_path
         owner.close()
         server_runtime.run(runner.cleanup())
         server_runtime.close()
+
+
+def test_native_heartbeat_remains_alive_during_actual_slow_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pong_count: list[bytes] = []
+    original_pong = aiohttp.ClientWebSocketResponse.pong
+    original_response = streaming.BoundedWebSocketResponse
+
+    async def pong(socket, data=b""):
+        pong_count.append(data)
+        return await original_pong(socket, data)
+
+    def heartbeat_response(**options):
+        return original_response(**{**options, "heartbeat": .04})
+
+    class SlowSession(FakeRealtimeSession):
+        async def commit(self):
+            await asyncio.sleep(.25)
+            await super().commit()
+
+    class SlowEngine(FakeEngine):
+        async def open_session(self):
+            session = SlowSession()
+            self.sessions.append(session)
+            return session
+
+    monkeypatch.setattr(aiohttp.ClientWebSocketResponse, "pong", pong)
+    monkeypatch.setattr(streaming, "BoundedWebSocketResponse", heartbeat_response)
+    engine = SlowEngine()
+    with TestClient(create_app(settings(tmp_path), engine)) as web:
+        owner = DesktopStreams()
+        events = Events()
+        worker = events.worker(owner, web.origin)
+        try:
+            worker.start()
+            assert events.connected.wait(1)
+            worker.feed((1000).to_bytes(2, "little", signed=True) * 1000)
+            assert events.partial.wait(1)
+            worker.commit()
+            assert events.completed.wait(1), events.failures
+            assert len(pong_count) >= 2
+            assert not events.failures and engine.sessions[0].closed
+            assert events.hypotheses[-1] == ("streamed speech", "streamed speech", "")
+        finally:
+            owner.close()

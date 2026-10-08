@@ -100,6 +100,9 @@ class StreamingWorker:
         self._pending_bytes = 0
         self._commit = self._cancel = self._wake_scheduled = False
         self._changed = asyncio.Event()
+        # Only the fixed sender and receiver use this lock. At most one
+        # waiter retains a bounded PCM chunk or a <=125-byte native PONG.
+        self._write_lock = asyncio.Lock()
         self._future: Any = None
         self._client: WebSocketClient | None = None
         self._failure: str | None = None
@@ -182,16 +185,24 @@ class StreamingWorker:
                     self._pending_bytes -= len(chunk)
                 commit = self._commit and chunk is None
             if chunk is not None:
-                await socket.send_bytes(chunk)
+                async with self._write_lock:
+                    await socket.send_bytes(chunk)
             elif commit:
-                await socket.send_str('{"type":"commit"}')
+                async with self._write_lock:
+                    await socket.send_str('{"type":"commit"}')
                 self.dispatch(self.on_state, "收尾")
                 return
             else:
                 await self._changed.wait()
 
     async def _event(self, socket) -> dict[str, Any]:
-        message = await socket.receive()
+        while True:
+            message = await socket.receive()
+            if message.type == WSMsgType.PING:
+                async with self._write_lock:
+                    await socket.pong(message.data)
+            elif message.type != WSMsgType.PONG:
+                break
         if message.type != WSMsgType.TEXT:
             raise RuntimeError("识别连接已关闭或返回非文本事件")
         value = strict_json_loads(message.data)
