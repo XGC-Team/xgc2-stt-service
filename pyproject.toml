@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = { text = "MIT" }
 dependencies = [
+  "xgc2-xrpc==0.1.0",
   "av>=16,<19",
   "fastapi>=0.133,<0.137",
   "httpx>=0.28,<0.29",

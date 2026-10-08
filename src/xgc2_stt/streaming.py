@@ -12,7 +12,7 @@ from functools import lru_cache
 from sys import byteorder
 from typing import Any
 
-from fastapi import WebSocket, WebSocketDisconnect
+from aiohttp import WSMsgType, web
 from opencc import OpenCC
 
 from .engine import EngineNotReady, SpeechEngine
@@ -73,8 +73,41 @@ class LeadingSilenceGate:
         return b""
 
 
+class WebSocketDisconnect(ConnectionError):
+    pass
+
+
+class NativeStreamSocket:
+    """Domain message adapter; aiohttp and the XRPC host own all socket IO."""
+
+    def __init__(self, request: web.Request):
+        self.request = request
+        self.query_params = request.query
+        self.native = web.WebSocketResponse(
+            max_msg_size=160_000, receive_timeout=30, heartbeat=10, timeout=2, compress=False
+        )
+
+    async def accept(self) -> None:
+        if not self.native.prepared:
+            await self.native.prepare(self.request)
+
+    async def send_json(self, value: Any) -> None:
+        await self.native.send_json(value)
+
+    async def receive(self) -> dict[str, Any]:
+        message = await self.native.receive()
+        if message.type == WSMsgType.BINARY:
+            return {"bytes": message.data}
+        if message.type == WSMsgType.TEXT:
+            return {"text": message.data}
+        raise WebSocketDisconnect()
+
+    async def close(self, *, code: int = 1000, reason: str = "") -> None:
+        await self.native.close(code=code, message=reason.encode())
+
+
 async def handle_stream(
-    websocket: WebSocket,
+    websocket: NativeStreamSocket,
     engine: SpeechEngine,
     *,
     silence_commit_ms: int = 2000,
@@ -208,9 +241,12 @@ async def handle_stream(
             )
             return True
         if upstream_committing:
+            if sum(map(len, pending_rollover)) + len(chunk) > 160_000:
+                await websocket.send_json(
+                    next_event("error", code="resource_exhausted", message="pending audio exceeds rollover limit")
+                )
+                return False
             pending_rollover.append(chunk)
-            while sum(map(len, pending_rollover)) > 160_000:
-                pending_rollover.pop(0)
             return True
 
         is_speech = LeadingSilenceGate.rms(chunk) >= silence_threshold
@@ -272,7 +308,7 @@ async def handle_stream(
                                 next_event("error", code="invalid_json", message="control messages must be JSON")
                             )
                         else:
-                            command_type = command.get("type")
+                            command_type = command.get("type") if isinstance(command, dict) else None
                             if command_type == "commit" and not client_committed:
                                 client_committed = True
                                 if upstream is None:
@@ -376,11 +412,11 @@ async def handle_stream(
     except WebSocketDisconnect:
         pass
     finally:
-        for task in (browser_task, upstream_task):
-            if task is not None and not task.done():
+        pending = [task for task in (browser_task, upstream_task) if task is not None]
+        for task in pending:
+            if not task.done():
                 task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+        await asyncio.gather(*pending, return_exceptions=True)
         if upstream is not None:
             await upstream.close()
         with suppress(RuntimeError, WebSocketDisconnect):

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RuntimeTuning(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     silence_commit_ms: int | None = Field(default=None, ge=500, le=30_000)
     max_active_streams: int | None = Field(default=None, ge=1, le=128)
     gpu_memory_utilization: float | None = Field(default=None, gt=0.1, le=0.98)
@@ -28,33 +30,67 @@ class RuntimeSettingsStore:
     def __init__(self, path: str):
         self.path = Path(path)
         self.values: dict[str, int | float | bool] = {}
+        self.revision = 0
+        self._lock = threading.Lock()
 
     def load(self) -> dict[str, int | float | bool]:
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-            payload = raw.get("values", raw) if isinstance(raw, dict) else {}
-            tuning = RuntimeTuning.model_validate(payload)
-        except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
-            self.values = {}
+            with self.path.open("rb") as source:
+                raw_bytes = source.read(16_385)
+            if len(raw_bytes) > 16_384:
+                raise ValueError("runtime settings exceed 16 KiB quota")
+            raw = json.loads(raw_bytes)
+            if (
+                not isinstance(raw, dict)
+                or set(raw) != {"schema_version", "revision", "values"}
+                or raw["schema_version"] != 2
+                or type(raw["revision"]) is not int
+                or raw["revision"] < 1
+            ):
+                raise ValueError("runtime settings require explicit schema 2 migration")
+            tuning = RuntimeTuning.model_validate(raw["values"])
+        except FileNotFoundError:
             return {}
+        self.revision = raw["revision"]
         self.values = tuning.model_dump(exclude_none=True)
         return dict(self.values)
 
-    def update(self, tuning: RuntimeTuning) -> dict[str, int | float | bool]:
-        self.values.update(tuning.model_dump(exclude_none=True))
-        validated = RuntimeTuning.model_validate(self.values)
-        self.values = validated.model_dump(exclude_none=True)
-        self._flush()
+    def update(self, tuning: RuntimeTuning, expected_revision: int) -> dict[str, int | float | bool]:
+        with self._lock:
+            return self._update(tuning, expected_revision)
+
+    def _update(self, tuning: RuntimeTuning, expected_revision: int) -> dict[str, int | float | bool]:
+        if type(expected_revision) is not int or expected_revision != self.revision:
+            raise RuntimeError("runtime settings revision conflict")
+        desired = {**self.values, **tuning.model_dump(exclude_none=True)}
+        validated = RuntimeTuning.model_validate(desired).model_dump(exclude_none=True)
+        self._flush(validated, self.revision + 1)
+        self.values = validated
+        self.revision += 1
         return dict(self.values)
 
-    def _flush(self) -> None:
+    def _flush(self, values: dict[str, int | float | bool], revision: int) -> None:
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as temporary:
-            json.dump({"schema_version": 1, "values": self.values}, temporary, ensure_ascii=False, indent=2)
-            temporary.write("\n")
-            temporary_path = Path(temporary.name)
-        os.chmod(temporary_path, 0o600)
-        temporary_path.replace(self.path)
+        data = json.dumps({"schema_version": 2, "revision": revision, "values": values}, allow_nan=False).encode()
+        if len(data) > 16_384:
+            raise ValueError("runtime settings exceed 16 KiB quota")
+        temporary_path: Path | None = None
+        try:
+            with NamedTemporaryFile("wb", dir=self.path.parent, delete=False) as temporary:
+                temporary_path = Path(temporary.name)
+                os.chmod(temporary_path, 0o600)
+                temporary.write(data)
+                temporary.flush()
+                os.fsync(temporary.fileno())
+            temporary_path.replace(self.path)
+            parent = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
 
 
 def settings_metadata() -> list[dict[str, str]]:

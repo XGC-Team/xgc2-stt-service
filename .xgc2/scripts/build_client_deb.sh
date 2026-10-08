@@ -26,6 +26,10 @@ case "${distribution}" in
     ;;
 esac
 case "${architecture}" in amd64|arm64) ;; *) echo "Only amd64 and arm64 are supported." >&2; exit 2 ;; esac
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' || {
+  echo "XRPC requires Python >= 3.10. The distribution runtime must be supplied by the release owner before building this target." >&2
+  exit 1
+}
 [[ "$(dpkg --print-architecture)" == "${architecture}" ]] || {
   echo "Build host architecture does not match ${architecture}." >&2
   exit 1
@@ -97,7 +101,7 @@ Priority: optional
 Architecture: ${architecture}
 Installed-Size: ${installed_size}
 Maintainer: ${maintainer}
-Depends: python3 (>= 3.8), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, python3-websocket, python3-pyaudio, python3-xlib
+Depends: python3 (>= 3.10), python3-xgc2-xrpc (>= 0.1.0), python3-gi, python3-gi-cairo, gir1.2-gtk-3.0, gir1.2-ayatanaappindicator3-0.1 | gir1.2-appindicator3-0.1, python3-websocket, python3-pyaudio, python3-xlib
 Recommends: gir1.2-notify-0.7, python3-sounddevice, wl-clipboard, xclip, xdotool
 Suggests: wtype, ydotool
 Description: Desktop client for a self-hosted streaming STT API

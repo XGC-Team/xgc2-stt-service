@@ -15,8 +15,9 @@ class Settings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = Field(default=8000, ge=1, le=65535)
-    internal_host: str = "127.0.0.1"
-    internal_port: int = Field(default=8001, ge=1, le=65535)
+    model_socket_path: str = "/run/xgc2-stt/model.sock"
+    model_session_idle_seconds: int = Field(default=30, ge=5, le=300)
+    model_session_max_seconds: int = Field(default=300, ge=10, le=1800)
 
     engine_variant: str = "qwen"
     model_id: str = "Qwen/Qwen3-ASR-1.7B"
@@ -33,7 +34,7 @@ class Settings(BaseSettings):
     qwen_chunk_size_seconds: float = Field(default=1.0, ge=0.25, le=5.0)
     qwen_unfixed_chunk_num: int = Field(default=4, ge=1, le=16)
     qwen_unfixed_token_num: int = Field(default=5, ge=1, le=64)
-    max_active_streams: int = Field(default=1, ge=1, le=128)
+    max_active_streams: int = Field(default=1, ge=1, le=1)
     silence_commit_ms: int = Field(default=2000, ge=500, le=30_000)
     api_key_store_path: str = "/var/lib/xgc2-stt/api-keys.json"
     runtime_settings_path: str = "/var/lib/xgc2-stt/runtime-settings.json"
@@ -41,7 +42,7 @@ class Settings(BaseSettings):
     gpu_metrics_interval_seconds: float = Field(default=2.0, ge=0.5, le=60.0)
 
     cors_origins: str = "*"
-    max_upload_bytes: int = Field(default=52_428_800, ge=1_048_576)
+    max_upload_bytes: int = Field(default=52_428_800, ge=1_048_576, le=52_428_800)
     web_dist: str = "/opt/xgc2-stt/web"
     log_level: str = "info"
 
@@ -58,15 +59,6 @@ class Settings(BaseSettings):
         if not value or value == "*":
             return ["*"]
         return [origin.strip() for origin in value.split(",") if origin.strip()]
-
-    @property
-    def internal_http_url(self) -> str:
-        return f"http://{self.internal_host}:{self.internal_port}"
-
-    @property
-    def internal_websocket_url(self) -> str:
-        return f"ws://{self.internal_host}:{self.internal_port}/v1/realtime"
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

@@ -15,17 +15,23 @@ from xgc2_stt.engine import (
     QwenSdkRealtimeSession,
     VllmEngine,
     _decode_audio_pcm16,
-    build_qwen_command,
+    build_engine_command,
     qwen_preview_parts,
 )
 
 
-def test_qwen_command_selects_official_revision_capable_streaming_server() -> None:
-    command = build_qwen_command(Settings())
-    assert command[:3] == ["qwen-asr-demo-streaming", "--asr-model-path", "Qwen/Qwen3-ASR-1.7B"]
-    assert command[command.index("--unfixed-chunk-num") + 1] == "4"
-    assert command[command.index("--unfixed-token-num") + 1] == "5"
-    assert command[command.index("--chunk-size-sec") + 1] == "1.0"
+def test_model_worker_uses_only_xrpc_endpoint() -> None:
+    settings = Settings()
+    command = build_engine_command(settings, "instance-1")
+    assert command == [
+        sys.executable,
+        "-m",
+        "xgc2_stt.model_worker",
+        "--socket",
+        settings.model_socket_path,
+        "--instance",
+        "instance-1",
+    ]
 
 
 def test_managed_engine_close_terminates_orphaned_worker_process_group(tmp_path: Path, monkeypatch: Any) -> None:
@@ -46,11 +52,11 @@ def test_managed_engine_close_terminates_orphaned_worker_process_group(tmp_path:
     monkeypatch.setattr(
         engine_module,
         "build_engine_command",
-        lambda settings: [sys.executable, "-c", launcher, str(worker_pid_path)],
+        lambda settings, instance: [sys.executable, "-c", launcher, str(worker_pid_path)],
     )
 
     async def exercise() -> None:
-        engine = VllmEngine(Settings())
+        engine = VllmEngine(Settings(model_socket_path=str(tmp_path / "model.sock")))
         worker_pid: int | None = None
         await engine.start()
         process = engine._process
@@ -106,34 +112,47 @@ def test_audio_upload_is_decoded_to_mono_pcm16(tmp_path: Path) -> None:
     assert _decode_audio_pcm16(str(audio)) == expected
 
 
-def test_qwen_session_emits_replaceable_partial_and_final() -> None:
-    texts = iter(["这是旧的", "这是修正后的结果"])
+def test_qwen_session_emits_replaceable_partial_and_final(tmp_path: Path) -> None:
+    from types import SimpleNamespace
 
-    def handler(request: Any) -> Any:
-        if request.url.path == "/api/chunk":
-            assert request.headers["content-type"] == "application/octet-stream"
-            assert len(request.content) == 16000 * 4
-            return engine_module.httpx.Response(200, json={"language": "Chinese", "text": next(texts)})
-        if request.url.path == "/api/finish":
-            return engine_module.httpx.Response(200, json={"language": "Chinese", "text": "这是修正后的结果"})
-        raise AssertionError(request.url.path)
+    from xgc2_xrpc import Client, Host, Runtime
 
-    async def exercise() -> None:
-        transport = engine_module.httpx.MockTransport(handler)
-        client = engine_module.httpx.AsyncClient(base_url="http://qwen.test", transport=transport)
-        session = QwenSdkRealtimeSession(client, "session-1", 16000 * 2)
-        await session.send_pcm((1000).to_bytes(2, "little", signed=True) * 16000)
-        first = await session.receive()
-        await session.send_pcm((1000).to_bytes(2, "little", signed=True) * 16000)
-        revised = await session.receive()
-        await session.commit()
-        final = await session.receive()
-        await session.close()
-        assert first["text"] == "这是旧的"
-        assert revised["text"] == "这是修正后的结果"
-        assert final["type"] == "transcription.done"
+    from xgc2_stt.model_worker import ModelDomain
 
-    asyncio.run(exercise())
+    class Model:
+        def init_streaming_state(self, **_kwargs: Any) -> Any:
+            return SimpleNamespace(text="", language="Chinese")
+
+        def streaming_transcribe(self, samples: Any, state: Any) -> None:
+            assert len(samples) == 16000
+            state.text = "这是旧的" if not state.text else "这是修正后的结果"
+
+        def finish_streaming_transcribe(self, state: Any) -> None:
+            state.text = "这是修正后的结果"
+
+    config = Settings()
+    domain = ModelDomain(config, Model())
+    with (
+        Runtime(blocking_workers=1) as runtime,
+        Host(str(tmp_path / "model.sock"), domain.routes(), runtime=runtime, instance_id="model-1"),
+        Client(str(tmp_path / "model.sock"), runtime=runtime, instance_id="model-1") as client,
+    ):
+
+        async def exercise() -> None:
+            session = await QwenSdkRealtimeSession.open(config, client)
+            await session.send_pcm((1000).to_bytes(2, "little", signed=True) * 16000)
+            first = await session.receive()
+            await session.send_pcm((1000).to_bytes(2, "little", signed=True) * 16000)
+            revised = await session.receive()
+            await session.commit()
+            final = await session.receive()
+            await session.close()
+            assert first["text"] == "这是旧的"
+            assert revised["text"] == "这是修正后的结果"
+            assert final["type"] == "transcription.done"
+            assert domain.session is None
+
+        asyncio.run(exercise())
 
 
 def test_qwen_preview_marks_only_the_recent_unfixed_window() -> None:

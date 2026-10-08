@@ -85,6 +85,10 @@ export interface RuntimeTuning {
 }
 
 export interface RuntimeSettingsResponse {
+  revision: number
+  desired: RuntimeTuning
+  applied: { [K in keyof RuntimeTuning]: RuntimeTuning[K] | null }
+  persisted: Partial<RuntimeTuning>
   values: RuntimeTuning
   pending: Partial<RuntimeTuning>
   restart_required: boolean
@@ -151,11 +155,11 @@ export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
   return response.json() as Promise<RuntimeSettingsResponse>
 }
 
-export async function updateRuntimeSettings(values: RuntimeTuning): Promise<RuntimeSettingsResponse> {
+export async function updateRuntimeSettings(values: RuntimeTuning, expectedRevision: number): Promise<RuntimeSettingsResponse> {
   const response = await fetch('/api/settings', {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(values),
+    body: JSON.stringify({ expected_revision: expectedRevision, values }),
   })
   if (!response.ok) {
     const payload = await response.json().catch(() => ({})) as { detail?: string }

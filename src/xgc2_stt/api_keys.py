@@ -41,6 +41,9 @@ _REQUIRED_RECORD_FIELDS = frozenset(
 
 
 class ApiKeyStore:
+    MAX_KEYS = 128
+    MAX_BYTES = 262_144
+
     def __init__(self, path: str):
         self.path = Path(path)
         self._records: dict[str, dict[str, Any]] = {}
@@ -99,6 +102,8 @@ class ApiKeyStore:
             "enabled": True,
         }
         with self._lock:
+            if len(self._records) >= self.MAX_KEYS:
+                raise ValueError("API key quota exceeded (128 records)")
             self._records[key_id] = record
             self._managed_authentication = True
             self._dirty = True
@@ -180,7 +185,12 @@ class ApiKeyStore:
 
     def _load(self) -> None:
         try:
-            payload = json.loads(self.path.read_text(encoding="utf-8"))
+            with self.path.open("rb") as source:
+                raw = source.read(self.MAX_BYTES + 1)
+            if len(raw) > self.MAX_BYTES:
+                self._fail_closed()
+                return
+            payload = json.loads(raw)
         except FileNotFoundError:
             return
         except (json.JSONDecodeError, OSError):
@@ -195,14 +205,15 @@ class ApiKeyStore:
             self._fail_closed()
             return
         records = payload["keys"]
-        if not all(self._valid_record(record) for record in records):
+        if (
+            len(records) > self.MAX_KEYS
+            or not all(self._valid_record(record) for record in records)
+            or len({record["id"] for record in records}) != len(records)
+        ):
             self._fail_closed()
             return
         with self._lock:
-            self._records = {
-                str(record["id"]): record
-                for record in records
-            }
+            self._records = {str(record["id"]): record for record in records}
             self._managed_authentication = payload["authentication_enabled"]
             for record in self._records.values():
                 if record.get("active_sessions"):
@@ -242,13 +253,27 @@ class ApiKeyStore:
                 }
                 self._dirty = False
             try:
+                data = json.dumps(payload, ensure_ascii=False, allow_nan=False, indent=2).encode("utf-8")
+                if len(data) > self.MAX_BYTES:
+                    raise OSError("API key store exceeds 256 KiB quota")
                 self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                with NamedTemporaryFile("w", encoding="utf-8", dir=self.path.parent, delete=False) as temporary:
-                    json.dump(payload, temporary, ensure_ascii=False, indent=2)
-                    temporary.write("\n")
-                    temporary_path = Path(temporary.name)
-                os.chmod(temporary_path, 0o600)
-                temporary_path.replace(self.path)
+                temporary_path: Path | None = None
+                try:
+                    with NamedTemporaryFile("wb", dir=self.path.parent, delete=False) as temporary:
+                        temporary_path = Path(temporary.name)
+                        os.chmod(temporary_path, 0o600)
+                        temporary.write(data)
+                        temporary.flush()
+                        os.fsync(temporary.fileno())
+                    temporary_path.replace(self.path)
+                    parent = os.open(self.path.parent, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(parent)
+                    finally:
+                        os.close(parent)
+                finally:
+                    if temporary_path is not None:
+                        temporary_path.unlink(missing_ok=True)
             except OSError:
                 with self._lock:
                     self._dirty = True
@@ -256,8 +281,4 @@ class ApiKeyStore:
 
     @staticmethod
     def _public(record: dict[str, Any]) -> dict[str, Any]:
-        return {
-            key: value
-            for key, value in record.items()
-            if key != "digest"
-        }
+        return {key: value for key, value in record.items() if key != "digest"}
