@@ -19,6 +19,7 @@ DEFAULT_HOTKEY = "<f9>"
 CLIENT_BINARY = "xgc2-stt-client"
 CLIENT_VERSION = "0.2.1"
 IPC_SOCKET_NAME = "desktop.sock"
+MAX_DESKTOP_CONFIG_BYTES = 16_384
 
 _MODIFIER_ALIASES = {
     "alt": "alt",
@@ -80,29 +81,72 @@ def default_config_path() -> Path:
 def load_desktop_settings(path: Path | None = None) -> DesktopSettings:
     target = path or default_config_path()
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        with target.open("rb") as handle:
+            data = handle.read(MAX_DESKTOP_CONFIG_BYTES + 1)
+        if len(data) > MAX_DESKTOP_CONFIG_BYTES:
+            return DesktopSettings()
+        raw = json.loads(data)
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError, OSError):
         return DesktopSettings()
     if not isinstance(raw, dict) or raw.get("schema_version") != 1:
         return DesktopSettings()
     allowed = {field.name for field in fields(DesktopSettings)}
-    values = {key: value for key, value in raw.items() if key in allowed}
+    if set(raw) - allowed:
+        return DesktopSettings()
     try:
-        return DesktopSettings(**values)
-    except TypeError:
+        settings = DesktopSettings(**raw)
+        _validate_desktop_settings(settings)
+        return settings
+    except (TypeError, ValueError):
         return DesktopSettings()
 
 
+def _validate_desktop_settings(settings: DesktopSettings) -> None:
+    if type(settings.schema_version) is not int or settings.schema_version != 1:
+        raise ValueError("unsupported desktop settings schema")
+    for name, maximum in (("endpoint", 4096), ("api_key", 4096), ("hotkey", 128)):
+        value = getattr(settings, name)
+        if not isinstance(value, str) or len(value) > maximum or "\x00" in value:
+            raise ValueError(f"invalid desktop {name}")
+    if (
+        not isinstance(settings.output_script, str)
+        or settings.output_script not in {"simplified", "original"}
+        or not isinstance(settings.paste_shortcut, str)
+        or settings.paste_shortcut not in {"terminal", "desktop"}
+    ):
+        raise ValueError("invalid desktop output preference")
+    if type(settings.silence_commit_ms) is not int or not 500 <= settings.silence_commit_ms <= 30_000:
+        raise ValueError("invalid desktop silence delay")
+    for name in ("trim_leading_silence", "auto_enter", "start_at_login"):
+        if type(getattr(settings, name)) is not bool:
+            raise ValueError(f"invalid desktop {name}")
+
+
 def save_desktop_settings(settings: DesktopSettings, path: Path | None = None) -> Path:
+    _validate_desktop_settings(settings)
+    data = (json.dumps(asdict(settings), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    if len(data) > MAX_DESKTOP_CONFIG_BYTES:
+        raise ValueError("desktop settings exceed byte quota")
     target = path or default_config_path()
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(target.parent, 0o700)
-    with NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as temporary:
-        json.dump(asdict(settings), temporary, ensure_ascii=False, indent=2)
-        temporary.write("\n")
-        temporary_path = Path(temporary.name)
-    os.chmod(temporary_path, 0o600)
-    temporary_path.replace(target)
+    temporary_path: Path | None = None
+    try:
+        with NamedTemporaryFile("wb", dir=target.parent, delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(data)
+            temporary.flush()
+            os.fchmod(temporary.fileno(), 0o600)
+            os.fsync(temporary.fileno())
+        temporary_path.replace(target)
+        directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return target
 
 
