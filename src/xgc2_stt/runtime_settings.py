@@ -47,7 +47,7 @@ class RuntimeSettingsStore:
                 or type(raw["revision"]) is not int
                 or raw["revision"] < 1
             ):
-                raise ValueError("runtime settings require explicit schema 2 migration")
+                raise ValueError("runtime settings require schema 2 initialization")
             tuning = RuntimeTuning.model_validate(raw["values"])
         except FileNotFoundError:
             return {}

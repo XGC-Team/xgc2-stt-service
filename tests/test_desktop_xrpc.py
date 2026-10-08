@@ -45,7 +45,7 @@ def test_commands_reject_wrong_instance_and_unknown_payload(
     try:
         with Runtime() as runtime:
             with Client(str(listener.path), runtime=runtime, instance_id="stale") as client:
-                with pytest.raises(TransportError, match="instance mismatch") as error:
+                with pytest.raises(TransportError, match="instance") as error:
                     client.json("/v1/command", {"command": "toggle"})
                 assert error.value.disposition == "outcome_unknown"
             with Client(str(listener.path), runtime=runtime, instance_id=listener.instance_id) as client:

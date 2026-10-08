@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -45,25 +44,35 @@ def test_failed_settings_save_keeps_revision_and_original(tmp_path: Path, monkey
     assert list(tmp_path.iterdir()) == [store.path]
 
 
-def test_legacy_settings_require_explicit_distinct_import(tmp_path: Path) -> None:
+@pytest.mark.parametrize("before", [
+    b'{"schema_version":1,"values":{"silence_commit_ms":2500}}',
+    b'{"schema_version":3,"revision":1,"values":{}}',
+    b'{"schema_version":2,"revision":true,"values":{}}',
+    b'{"schema_version":2,"revision":1,"values":{"unknown":5}}',
+    b'{invalid json',
+])
+def test_old_or_corrupt_settings_reject_without_writes(tmp_path: Path, before: bytes) -> None:
+    source = tmp_path / "original.json"
+    source.write_bytes(before)
+    with pytest.raises(ValueError):
+        RuntimeSettingsStore(str(source)).load()
+    assert source.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [source]
+
+
+def test_explicit_v2_initialization_at_new_path_keeps_existing_data(tmp_path: Path) -> None:
     source = tmp_path / "original.json"
     before = b'{"schema_version":1,"values":{"silence_commit_ms":2500}}'
     source.write_bytes(before)
-    with pytest.raises(ValueError, match="explicit"):
-        RuntimeSettingsStore(str(source)).load()
-    spec = importlib.util.spec_from_file_location(
-        "settings_migration",
-        Path(__file__).resolve().parents[1] / "scripts/migrate-runtime-settings.py",
-    )
-    assert spec and spec.loader
-    migration = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(migration)
-    destination = tmp_path / "imported.json"
-    migration.migrate(source, destination)
+    destination = tmp_path / "new-settings.json"
+    store = RuntimeSettingsStore(str(destination))
+    assert store.load() == {} and store.revision == 0
+    assert not destination.exists()
+    store.update(RuntimeTuning(silence_commit_ms=2000), expected_revision=0)
+    assert json.loads(destination.read_bytes()) == {
+        "schema_version": 2, "revision": 1, "values": {"silence_commit_ms": 2000},
+    }
     assert source.read_bytes() == before
-    assert json.loads(destination.read_bytes())["revision"] == 1
-    with pytest.raises(ValueError, match="absent"):
-        migration.migrate(source, destination)
 
 
 def test_key_quota_and_oversized_store_fail_closed(tmp_path: Path) -> None:
