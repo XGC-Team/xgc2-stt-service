@@ -7,10 +7,7 @@ need_apt=()
 python3 -c 'import gi, gi.repository' >/dev/null 2>&1 || need_apt+=(python3-gi python3-gi-cairo gir1.2-gtk-3.0)
 python3 -c 'import pyaudio' >/dev/null 2>&1 || need_apt+=(python3-pyaudio)
 python3 -c 'import Xlib' >/dev/null 2>&1 || need_apt+=(python3-xlib)
-python3 -c 'import sys; assert sys.version_info >= (3, 10); from xgc2_xrpc.websocket import WebSocketClient' >/dev/null 2>&1 || {
-  echo "Install the approved Python >= 3.10 and python3-xgc2-xrpc native SDK package first." >&2
-  exit 1
-}
+python3 -c 'import websocket' >/dev/null 2>&1 || need_apt+=(python3-websocket)
 python3 -c '
 import gi
 try:

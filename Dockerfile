@@ -34,19 +34,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     STT_WEB_DIST=/opt/xgc2-stt/web \
     STT_HOST=0.0.0.0 \
     STT_PORT=8000 \
-    STT_MODEL_SOCKET_PATH=/run/xgc2-stt/model.sock
+    STT_INTERNAL_HOST=127.0.0.1 \
+    STT_INTERNAL_PORT=8001
 
 WORKDIR /opt/xgc2-stt/app
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 RUN python3 -m pip install --no-cache-dir --no-deps .
-RUN python3 -c "import importlib.metadata as m; import xgc2_xrpc; assert m.version('xgc2-xrpc') == '0.1.0'; assert m.version('aiohttp') == '3.14.4'"
 
 RUN install -d -o 2000 -g 0 -m 0770 \
       /var/lib/xgc2-stt \
       /opt/xgc2-stt/models \
       /opt/xgc2-stt/web; \
-    install -d -o 2000 -g 0 -m 0700 /run/xgc2-stt; \
     install -d /opt/xgc2-stt/licenses; \
     if [ -f /usr/share/common-licenses/Apache-2.0 ]; then \
       cp /usr/share/common-licenses/Apache-2.0 /opt/xgc2-stt/licenses/APACHE-2.0.txt; \
@@ -56,13 +55,13 @@ COPY --from=web-builder --chown=2000:0 /build/web/dist/ /opt/xgc2-stt/web/
 
 USER 2000:0
 VOLUME ["/var/lib/xgc2-stt"]
-EXPOSE 8000 8002
+EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -fsS http://127.0.0.1:8000/healthz >/dev/null || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["python3", "-m", "xgc2_stt.main"]
+CMD ["uvicorn", "xgc2_stt.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 FROM ${STT_RUNTIME_IMAGE} AS qwen-weights
 ARG QWEN_MODEL=Qwen/Qwen3-ASR-1.7B

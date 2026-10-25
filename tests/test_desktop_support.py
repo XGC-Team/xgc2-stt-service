@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 import sys
 from pathlib import Path
@@ -46,52 +45,6 @@ def test_desktop_settings_are_private_and_round_trip(tmp_path: Path) -> None:
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
     assert json.loads(target.read_text(encoding="utf-8"))["api_key"] == "secret"
     assert load_desktop_settings(target) == expected
-
-
-@pytest.mark.parametrize(
-    "data",
-    [
-        b"x" * 16_385,
-        b"\xff",
-        b'{"schema_version":true}',
-        b'{"schema_version":1,"auto_enter":"false"}',
-        b'{"schema_version":1,"silence_commit_ms":false}',
-        b'{"schema_version":1,"output_script":[]}',
-        b'{"schema_version":1,"unowned_field":true}',
-    ],
-)
-def test_desktop_config_invalid_input_fails_closed(tmp_path: Path, data: bytes) -> None:
-    target = tmp_path / "client.json"
-    target.write_bytes(data)
-    assert load_desktop_settings(target) == DesktopSettings()
-
-
-def test_desktop_config_quota_rejected_before_any_write(tmp_path: Path) -> None:
-    target = tmp_path / "config" / "client.json"
-    with pytest.raises(ValueError):
-        save_desktop_settings(DesktopSettings(endpoint="界" * 4096, api_key="界" * 4096), target)
-    assert not target.parent.exists()
-
-
-@pytest.mark.parametrize("failure", ["replace", "fsync"])
-def test_desktop_config_failed_commit_preserves_original_and_cleans_temporary(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
-) -> None:
-    target = tmp_path / "config" / "client.json"
-    save_desktop_settings(DesktopSettings(api_key="original"), target)
-    original = target.read_bytes()
-
-    def fail(*_args: object) -> None:
-        raise OSError("isolated write failure")
-
-    if failure == "replace":
-        monkeypatch.setattr(Path, "replace", fail)
-    else:
-        monkeypatch.setattr(os, "fsync", fail)
-    with pytest.raises(OSError):
-        save_desktop_settings(DesktopSettings(api_key="next"), target)
-    assert target.read_bytes() == original
-    assert list(target.parent.iterdir()) == [target]
 
 
 def test_auto_enter_is_off_by_default() -> None:

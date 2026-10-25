@@ -18,14 +18,6 @@ organization and enter its URL and key during initial setup.
 | API gateway | HTTP and WebSocket speech-recognition endpoints without the management UI |
 | Desktop client | Tray application for X11 and Wayland, global shortcut or CLI toggle, preview and text insertion |
 
-One `xgc2_stt.main` process owns two XRPC native Hosts: management on container
-port 8000 and the API-only router on 8002. Compose publishes the existing
-34896/34897 defaults. Both Hosts share model state, keys and transcription
-admission; the API router exposes no management or static UI routes. The old
-`xgc2_stt.api_proxy` entry and separate `api` container are retired in source.
-Each Host has finite 32-connection / 16-request budgets, with the shared Runtime
-also limiting the whole process to 32 connections and 16 requests.
-
 The management interface and client-facing API are separate trust boundaries.
 Keep management access on loopback or a private administration network. Put
 the client API behind an HTTPS/WSS reverse proxy before allowing remote use.
@@ -74,9 +66,6 @@ Prerequisites:
 
 No host CUDA Toolkit is required. Copy the environment template, choose your
 own bind addresses and ports, then deploy an embedded-weight image:
-
-The XRPC migration is source-only until a new approved runtime image supplies
-the SDK and its pinned native dependencies. See [deployment gates](contracts/xrpc.md).
 
 ```bash
 cp .env.example .env
@@ -191,7 +180,7 @@ sudo apt install xgc2-stt-client
 xgc2-stt-client
 ```
 
-APT resolves `Depends` (`python3-xgc2-xrpc`, `python3-pyaudio`, `python3-xlib`,
+APT resolves `Depends` (`python3-websocket`, `python3-pyaudio`, `python3-xlib`,
 GTK). `python3-sounddevice` is recommended on Ubuntu 22.04+ only.
 
 CI also uploads the same build artifacts for central release-train verification.

@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from native_client import TestClient, WebSocketDisconnect
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from xgc2_stt.api_keys import ApiKeyStore
 from xgc2_stt.config import Settings
@@ -197,11 +198,10 @@ def test_api_key_guards_http_and_websocket(tmp_path: Path) -> None:
         assert client.get("/api/status").status_code == 200
         assert client.get("/v1/models").status_code == 401
         assert client.get("/v1/models", headers={"Authorization": f"Bearer {secret}"}).status_code == 200
-        with (
-            client.websocket_connect("/v1/audio/transcriptions/stream") as socket,
-            pytest.raises(WebSocketDisconnect) as error,
+        with pytest.raises(WebSocketDisconnect) as error, client.websocket_connect(
+            "/v1/audio/transcriptions/stream"
         ):
-            socket.receive_json()
+            pass
         assert error.value.code == 4401
 
 
@@ -269,15 +269,15 @@ def test_runtime_settings_distinguish_hot_changes_from_model_restart(tmp_path: P
     with TestClient(app) as client:
         current = client.get("/api/settings").json()
         assert current["values"]["silence_commit_ms"] == 2000
-        hot = client.put("/api/settings", json={"expected_revision": 0, "values": {"silence_commit_ms": 2500}})
+        hot = client.put("/api/settings", json={"silence_commit_ms": 2500})
         assert hot.status_code == 200
         assert hot.json()["restart_required"] is False
         assert client.get("/api/status").json()["stream"]["capacity"] == 1
 
-        rejected = client.put("/api/settings", json={"expected_revision": 1, "values": {"max_active_streams": 2}})
+        rejected = client.put("/api/settings", json={"max_active_streams": 2})
         assert rejected.status_code == 400
 
-        pending = client.put("/api/settings", json={"expected_revision": 1, "values": {"gpu_memory_utilization": 0.7}})
+        pending = client.put("/api/settings", json={"gpu_memory_utilization": 0.7})
         assert pending.json()["restart_required"] is True
         assert pending.json()["pending"] == {"gpu_memory_utilization": 0.7}
         restarted = client.post("/api/engine/restart")
@@ -318,7 +318,9 @@ def test_stream_preserves_initial_audio_when_silence_trimming_is_disabled(tmp_pa
     speech = (1000).to_bytes(2, "little", signed=True) * 4000
     with (
         TestClient(create_app(settings(tmp_path), engine)) as client,
-        client.websocket_connect("/v1/audio/transcriptions/stream?trim_leading_silence=0") as socket,
+        client.websocket_connect(
+            "/v1/audio/transcriptions/stream?trim_leading_silence=0"
+        ) as socket,
     ):
         started = socket.receive_json()
         assert started["trim_leading_silence"] is False
@@ -339,10 +341,14 @@ def test_stream_rejects_invalid_recognition_settings(tmp_path: Path) -> None:
             error = socket.receive_json()
             assert error["type"] == "error"
             assert error["code"] == "invalid_output_script"
-        with client.websocket_connect("/v1/audio/transcriptions/stream?trim_leading_silence=maybe") as socket:
+        with client.websocket_connect(
+            "/v1/audio/transcriptions/stream?trim_leading_silence=maybe"
+        ) as socket:
             error = socket.receive_json()
             assert error["code"] == "invalid_trim_leading_silence"
-        with client.websocket_connect("/v1/audio/transcriptions/stream?silence_commit_ms=fast") as socket:
+        with client.websocket_connect(
+            "/v1/audio/transcriptions/stream?silence_commit_ms=fast"
+        ) as socket:
             error = socket.receive_json()
             assert error["code"] == "invalid_silence_commit_ms"
     assert engine.sessions == []
@@ -350,7 +356,7 @@ def test_stream_rejects_invalid_recognition_settings(tmp_path: Path) -> None:
 
 def test_retired_stream_alias_is_not_registered(tmp_path: Path) -> None:
     app = create_app(settings(tmp_path), FakeEngine())
-    assert all(route.resource.canonical != "/v1/stream" for route in app.router.routes())
+    assert all(getattr(route, "path", None) != "/v1/stream" for route in app.routes)
 
 
 def test_stream_rejects_a_second_active_session(tmp_path: Path) -> None:

@@ -130,9 +130,5 @@ def test_service_version_and_runtime_image_references_stay_aligned() -> None:
 
     immutable_ref = f"ghcr.io/xgc-team/xgc2-stt-service:qwen-{version}"
     assert immutable_ref in (ROOT / ".env.example").read_text(encoding="utf-8")
-    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
-    assert compose.count(immutable_ref) == 1
-    assert ":8000\"" in compose and ":8002\"" in compose
-    assert "STT_API_PORT: 8002" in compose
-    assert "  api:\n" not in compose
+    assert (ROOT / "docker-compose.yml").read_text(encoding="utf-8").count(immutable_ref) == 2
     assert f'${{registry}}:qwen-{version}' in (ROOT / "scripts/deploy-local.sh").read_text(encoding="utf-8")

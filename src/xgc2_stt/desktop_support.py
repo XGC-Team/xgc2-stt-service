@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import secrets
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -18,8 +20,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 DEFAULT_HOTKEY = "<f9>"
 CLIENT_BINARY = "xgc2-stt-client"
 CLIENT_VERSION = "0.2.1"
-IPC_SOCKET_NAME = "desktop.sock"
-MAX_DESKTOP_CONFIG_BYTES = 16_384
+IPC_SOCKET_NAME = "xgc2-stt-client.sock"
 
 _MODIFIER_ALIASES = {
     "alt": "alt",
@@ -81,72 +82,29 @@ def default_config_path() -> Path:
 def load_desktop_settings(path: Path | None = None) -> DesktopSettings:
     target = path or default_config_path()
     try:
-        with target.open("rb") as handle:
-            data = handle.read(MAX_DESKTOP_CONFIG_BYTES + 1)
-        if len(data) > MAX_DESKTOP_CONFIG_BYTES:
-            return DesktopSettings()
-        raw = json.loads(data)
-    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError, OSError):
+        raw = json.loads(target.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
         return DesktopSettings()
     if not isinstance(raw, dict) or raw.get("schema_version") != 1:
         return DesktopSettings()
     allowed = {field.name for field in fields(DesktopSettings)}
-    if set(raw) - allowed:
-        return DesktopSettings()
+    values = {key: value for key, value in raw.items() if key in allowed}
     try:
-        settings = DesktopSettings(**raw)
-        _validate_desktop_settings(settings)
-        return settings
-    except (TypeError, ValueError):
+        return DesktopSettings(**values)
+    except TypeError:
         return DesktopSettings()
-
-
-def _validate_desktop_settings(settings: DesktopSettings) -> None:
-    if type(settings.schema_version) is not int or settings.schema_version != 1:
-        raise ValueError("unsupported desktop settings schema")
-    for name, maximum in (("endpoint", 4096), ("api_key", 4096), ("hotkey", 128)):
-        value = getattr(settings, name)
-        if not isinstance(value, str) or len(value) > maximum or "\x00" in value:
-            raise ValueError(f"invalid desktop {name}")
-    if (
-        not isinstance(settings.output_script, str)
-        or settings.output_script not in {"simplified", "original"}
-        or not isinstance(settings.paste_shortcut, str)
-        or settings.paste_shortcut not in {"terminal", "desktop"}
-    ):
-        raise ValueError("invalid desktop output preference")
-    if type(settings.silence_commit_ms) is not int or not 500 <= settings.silence_commit_ms <= 30_000:
-        raise ValueError("invalid desktop silence delay")
-    for name in ("trim_leading_silence", "auto_enter", "start_at_login"):
-        if type(getattr(settings, name)) is not bool:
-            raise ValueError(f"invalid desktop {name}")
 
 
 def save_desktop_settings(settings: DesktopSettings, path: Path | None = None) -> Path:
-    _validate_desktop_settings(settings)
-    data = (json.dumps(asdict(settings), ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    if len(data) > MAX_DESKTOP_CONFIG_BYTES:
-        raise ValueError("desktop settings exceed byte quota")
     target = path or default_config_path()
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(target.parent, 0o700)
-    temporary_path: Path | None = None
-    try:
-        with NamedTemporaryFile("wb", dir=target.parent, delete=False) as temporary:
-            temporary_path = Path(temporary.name)
-            temporary.write(data)
-            temporary.flush()
-            os.fchmod(temporary.fileno(), 0o600)
-            os.fsync(temporary.fileno())
-        temporary_path.replace(target)
-        directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+    with NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as temporary:
+        json.dump(asdict(settings), temporary, ensure_ascii=False, indent=2)
+        temporary.write("\n")
+        temporary_path = Path(temporary.name)
+    os.chmod(temporary_path, 0o600)
+    temporary_path.replace(target)
     return target
 
 
@@ -326,134 +284,89 @@ def format_desktop_version() -> str:
 
 
 def ipc_socket_path() -> Path:
-    runtime = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-    return runtime / "xgc2-stt" / IPC_SOCKET_NAME
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime:
+        return Path(runtime) / IPC_SOCKET_NAME
+    return Path(f"/tmp/{IPC_SOCKET_NAME}.{os.getuid()}")
 
 
 def send_running_instance(command: str, timeout: float = 1.0) -> bool:
-    from xgc2_xrpc import Client, Fault, Limits, Runtime, TransportError
-
-    if command not in {"ping", "toggle", "settings", "activate"}:
-        return False
     path = ipc_socket_path()
     if not path.exists():
         return False
     try:
-        with Runtime.from_environment(
-            blocking_workers=1,
-            defaults={
-                "HOST_MAX_IN_FLIGHT": 2,
-                "HOST_MAX_CONNECTIONS": 2,
-                "CLIENT_MAX_REFERENCES": 2,
-                "CLIENT_MAX_CONNECTIONS": 2,
-                "MAX_REQUEST_BYTES": 1024,
-                "MAX_RESPONSE_BYTES": 1024,
-            },
-            ceilings={
-                "HOST_MAX_IN_FLIGHT": 2,
-                "HOST_MAX_CONNECTIONS": 2,
-                "CLIENT_MAX_REFERENCES": 2,
-                "CLIENT_MAX_CONNECTIONS": 2,
-                "MAX_REQUEST_BYTES": 1024,
-                "MAX_RESPONSE_BYTES": 1024,
-            },
-        ) as runtime:
-            with Client(str(path), runtime=runtime, limits=Limits(body_bytes=1024, response_bytes=1024)) as discovery:
-                instance = discovery.json("/v1/instance", method="GET", timeout=timeout)["instance_id"]
-            if command == "ping":
-                return True
-            with Client(
-                str(path), runtime=runtime, instance_id=instance, limits=Limits(body_bytes=1024, response_bytes=1024)
-            ) as client:
-                return client.json("/v1/command", {"command": command}, timeout=timeout).get("accepted") is True
-    except (OSError, RuntimeError, ValueError, KeyError, Fault, TransportError):
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        try:
+            sock.connect(str(path))
+            sock.sendall(f"{command.strip()}\n".encode())
+            reply = sock.recv(16).decode("utf-8", errors="replace").strip()
+        finally:
+            sock.close()
+    except OSError:
         return False
+    return reply == "ok"
 
 
 class DesktopIpcListener:
-    """XRPC endpoint owned until all command handlers have quiesced."""
+    """Single-instance Unix socket so CLI flags can reach the tray process."""
 
     def __init__(self, handler: Callable[[str], None]):
         self._handler = handler
-        self._runtime: Any = None
-        self._host: Any = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._sock: socket.socket | None = None
         self.path = ipc_socket_path()
-        self.instance_id = secrets.token_hex(16)
 
     def start(self) -> None:
-        from xgc2_xrpc import Host, Limits, Runtime
+        if send_running_instance("ping"):
+            raise RuntimeError("XGC2 STT client is already running")
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with suppress(OSError):
+            if self.path.exists():
+                self.path.unlink()
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.bind(str(self.path))
+        os.chmod(self.path, 0o600)
+        sock.listen(4)
+        sock.settimeout(0.3)
+        self._sock = sock
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="xgc2-stt-ipc", daemon=True)
+        self._thread.start()
 
-        if self._runtime is not None:
-            raise RuntimeError("desktop IPC already started")
-        self.path.parent.mkdir(mode=0o700, exist_ok=True)
-        runtime = Runtime.from_environment(
-            blocking_workers=1,
-            defaults={
-                "HOST_MAX_IN_FLIGHT": 1,
-                "HOST_MAX_CONNECTIONS": 4,
-                "CLIENT_MAX_REFERENCES": 1,
-                "MAX_REQUEST_BYTES": 1024,
-                "MAX_RESPONSE_BYTES": 1024,
-                "CALL_TIMEOUT_MS": 1000,
-                "SHUTDOWN_TIMEOUT_MS": 2000,
-            },
-            ceilings={
-                "HOST_MAX_IN_FLIGHT": 1,
-                "HOST_MAX_CONNECTIONS": 4,
-                "CLIENT_MAX_REFERENCES": 1,
-                "MAX_REQUEST_BYTES": 1024,
-                "MAX_RESPONSE_BYTES": 1024,
-            },
-        )
-        host = Host(
-            str(self.path),
-            {
-                ("GET", "/v1/instance"): self._instance,
-                ("POST", "/v1/command"): self._command,
-            },
-            runtime=runtime,
-            limits=Limits(connections=4, in_flight=1, body_bytes=1024, response_bytes=1024, call_timeout=1),
-            instance_id=self.instance_id,
-            discovery_routes=("/v1/instance",),
-            reclaim_unreachable=True,
-            allowed_uids={os.getuid()},
-        )
-        try:
-            host.start()
-        except BaseException:
-            runtime.close()
-            raise
-        self._runtime, self._host = runtime, host
-
-    async def _instance(self, _context: Any, _payload: Any) -> dict[str, str]:
-        return {"instance_id": self.instance_id}
-
-    def _command(self, _context: Any, payload: Any) -> dict[str, bool]:
-        from xgc2_xrpc import Fault
-
-        if (
-            not isinstance(payload, dict)
-            or set(payload) != {"command"}
-            or not isinstance(payload["command"], str)
-            or payload["command"]
-            not in {
-                "toggle",
-                "settings",
-                "activate",
-            }
-        ):
-            raise Fault("invalid_argument", "unknown desktop command")
-        self._handler(payload["command"])
-        # The GUI dispatcher accepted the command; this is not capture completion.
-        return {"accepted": True}
+    def _run(self) -> None:
+        assert self._sock is not None
+        while not self._stop.is_set():
+            try:
+                conn, _unused = self._sock.accept()
+            except OSError:
+                if self._stop.is_set() or self._sock is None:
+                    break
+                continue
+            with conn:
+                try:
+                    payload = conn.recv(256).decode("utf-8", errors="replace").strip()
+                    command = payload.splitlines()[0] if payload else ""
+                    if command:
+                        self._handler(command)
+                    conn.sendall(b"ok\n")
+                except OSError:
+                    pass
 
     def stop(self) -> None:
-        if self._host is not None:
-            self._host.close()
-            self._host = None
-        if self._runtime is not None:
-            self._runtime.close()
-            self._runtime = None
+        self._stop.set()
+        sock = self._sock
+        self._sock = None
+        if sock is not None:
+            with suppress(OSError):
+                sock.close()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=2)
+        self._thread = None
+        with suppress(OSError):
+            self.path.unlink()
 
 
 def paste_xdotool_chord(paste_shortcut: str) -> str:

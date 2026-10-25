@@ -16,7 +16,6 @@ dpkg-deb --contents "${deb}" >"${contents}"
 grep -F './usr/bin/xgc2-stt-client' "${contents}" >/dev/null
 grep -F './usr/lib/python3/dist-packages/xgc2_stt/desktop.py' "${contents}" >/dev/null
 grep -F './usr/lib/python3/dist-packages/xgc2_stt/desktop_cli.py' "${contents}" >/dev/null
-grep -F './usr/lib/python3/dist-packages/xgc2_stt/desktop_stream.py' "${contents}" >/dev/null
 grep -F './usr/share/applications/xgc2-stt-client.desktop' "${contents}" >/dev/null
 grep -F './usr/share/metainfo/io.xgc2.stt-client.metainfo.xml' "${contents}" >/dev/null
 if grep -E './opt/xgc2-stt-client|PySide|PyInstaller|libQt6' "${contents}" >/dev/null; then
@@ -36,7 +35,7 @@ if grep -Eqi 'PySide6|python-build-standalone|PyInstaller' "${docs_root}/THIRD_P
   exit 1
 fi
 depends="$(dpkg-deb -f "${deb}" Depends)"
-for required_dependency in python3 python3-xgc2-xrpc python3-gi gir1.2-gtk-3.0 python3-pyaudio python3-xlib; do
+for required_dependency in python3 python3-gi gir1.2-gtk-3.0 python3-websocket python3-pyaudio python3-xlib; do
   printf '%s\n' "${depends}" | grep -Eq "(^|, )${required_dependency}([ ,(]|$)" || {
     echo "Client package is missing a direct runtime dependency: ${required_dependency}" >&2
     exit 1

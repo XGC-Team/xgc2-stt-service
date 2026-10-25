@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import json
 import os
 import re
-import secrets
 import signal
-import sys
 import time
 from contextlib import suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from xgc2_xrpc import Client, Fault, Limits, Runtime, TransportError
+import httpx
+import numpy as np
 
 from .config import Settings
 
@@ -86,7 +83,7 @@ class QwenSdkRealtimeSession:
 
     def __init__(
         self,
-        client: Client,
+        client: httpx.AsyncClient,
         session_id: str,
         chunk_bytes: int,
         unfixed_chunk_num: int = 4,
@@ -96,7 +93,7 @@ class QwenSdkRealtimeSession:
         self.session_id = session_id
         self.chunk_bytes = chunk_bytes
         self.buffer = bytearray()
-        self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=2)
+        self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.last_text = ""
         self.language = ""
         self.finished = False
@@ -105,52 +102,45 @@ class QwenSdkRealtimeSession:
         self.unfixed_token_num = unfixed_token_num
 
     @classmethod
-    async def open(cls, settings: Settings, client: Client) -> QwenSdkRealtimeSession:
-        payload = await cls._call(client, "/v1/session/start", {})
-        return cls(
-            client,
-            payload["session_id"],
-            round(settings.qwen_chunk_size_seconds * 16000 * 2),
-            settings.qwen_unfixed_chunk_num,
-            settings.qwen_unfixed_token_num,
-        )
-
-    @staticmethod
-    async def _call(client: Client, path: str, payload: dict[str, Any]) -> dict[str, Any]:
-        result = await asyncio.wrap_future(client.runtime.submit(client.call_async(path, payload, timeout=300)))
-        return json.loads(result.body)
-
-    def _emit(self, event: dict[str, Any]) -> None:
-        # A slow consumer needs the newest revision, not every superseded partial.
-        if self.events.full():
-            self.events.get_nowait()
-        self.events.put_nowait(event)
+    async def open(cls, settings: Settings) -> QwenSdkRealtimeSession:
+        client = httpx.AsyncClient(base_url=settings.internal_http_url, timeout=300)
+        try:
+            response = await client.post("/api/start")
+            response.raise_for_status()
+            session_id = str(response.json()["session_id"])
+            chunk_bytes = round(settings.qwen_chunk_size_seconds * 16000 * 2)
+            return cls(
+                client,
+                session_id,
+                chunk_bytes,
+                settings.qwen_unfixed_chunk_num,
+                settings.qwen_unfixed_token_num,
+            )
+        except Exception:
+            await client.aclose()
+            raise
 
     async def send_pcm(self, pcm: bytes) -> None:
         if self.finished or not pcm:
             return
-        if len(pcm) % 2:
-            raise ValueError("PCM16 must contain complete samples")
-        offset = 0
-        while offset < len(pcm):
-            count = min(self.chunk_bytes - len(self.buffer), len(pcm) - offset)
-            self.buffer.extend(pcm[offset : offset + count])
-            offset += count
-            if len(self.buffer) == self.chunk_bytes:
-                chunk = bytes(self.buffer)
-                self.buffer.clear()
-                await self._send_chunk(chunk)
+        self.buffer.extend(pcm)
+        while len(self.buffer) >= self.chunk_bytes:
+            chunk = bytes(self.buffer[: self.chunk_bytes])
+            del self.buffer[: self.chunk_bytes]
+            await self._send_chunk(chunk)
 
     async def _send_chunk(self, pcm: bytes) -> None:
         self.chunk_count += 1
-        payload = await self._call(
-            self.client,
-            "/v1/session/chunk",
-            {
-                "session_id": self.session_id,
-                "pcm16": base64.b64encode(pcm).decode("ascii"),
-            },
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32)
+        samples *= 1.0 / 32768.0
+        response = await self.client.post(
+            "/api/chunk",
+            params={"session_id": self.session_id},
+            content=samples.tobytes(),
+            headers={"Content-Type": "application/octet-stream"},
         )
+        response.raise_for_status()
+        payload = response.json()
         self.language = str(payload.get("language") or self.language)
         text = str(payload.get("text") or "")
         if text != self.last_text:
@@ -161,7 +151,7 @@ class QwenSdkRealtimeSession:
                 unfixed_chunk_num=self.unfixed_chunk_num,
                 unfixed_token_num=self.unfixed_token_num,
             )
-            self._emit(
+            await self.events.put(
                 {
                     "type": "transcription.partial",
                     "text": text,
@@ -179,21 +169,29 @@ class QwenSdkRealtimeSession:
             chunk = bytes(self.buffer)
             self.buffer.clear()
             await self._send_chunk(chunk)
-        payload = await self._call(self.client, "/v1/session/finish", {"session_id": self.session_id})
+        response = await self.client.post("/api/finish", params={"session_id": self.session_id})
+        response.raise_for_status()
+        payload = response.json()
         self.finished = True
         self.language = str(payload.get("language") or self.language)
         self.last_text = str(payload.get("text") or self.last_text)
-        self._emit({"type": "transcription.done", "text": self.last_text, "language": self.language or None})
+        await self.events.put(
+            {
+                "type": "transcription.done",
+                "text": self.last_text,
+                "language": self.language or None,
+            }
+        )
 
     async def receive(self) -> dict[str, Any]:
         return await self.events.get()
 
     async def close(self) -> None:
         if not self.finished:
-            with suppress(Fault, TransportError):
-                await self._call(self.client, "/v1/session/abort", {"session_id": self.session_id})
+            with suppress(Exception):
+                await self.client.post("/api/finish", params={"session_id": self.session_id})
         self.finished = True
-        self.buffer.clear()
+        await self.client.aclose()
 
 
 def qwen_preview_parts(
@@ -213,25 +211,33 @@ def qwen_preview_parts(
     return text[:split_at], text[split_at:]
 
 
-def build_engine_command(settings: Settings, instance_id: str) -> list[str]:
+def build_qwen_command(settings: Settings) -> list[str]:
     return [
-        sys.executable,
-        "-m",
-        "xgc2_stt.model_worker",
-        "--socket",
-        settings.model_socket_path,
-        "--instance",
-        instance_id,
+        "qwen-asr-demo-streaming",
+        "--asr-model-path",
+        settings.model_id,
+        "--gpu-memory-utilization",
+        str(settings.gpu_memory_utilization),
+        "--host",
+        settings.internal_host,
+        "--port",
+        str(settings.internal_port),
+        "--unfixed-chunk-num",
+        str(settings.qwen_unfixed_chunk_num),
+        "--unfixed-token-num",
+        str(settings.qwen_unfixed_token_num),
+        "--chunk-size-sec",
+        str(settings.qwen_chunk_size_seconds),
     ]
+
+
+def build_engine_command(settings: Settings) -> list[str]:
+    return build_qwen_command(settings)
 
 
 class VllmEngine:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._runtime: Runtime | None = None
-        self._client: Client | None = None
-        self._instance_id = ""
-        self._jobs: set[Any] = set()
         self._process: asyncio.subprocess.Process | None = None
         self._process_group_id: int | None = None
         self._monitor_task: asyncio.Task[None] | None = None
@@ -248,44 +254,11 @@ class VllmEngine:
         if not self.settings.manage_engine:
             self._state = "idle"
             return
-        path = Path(self.settings.model_socket_path)
-        path.parent.mkdir(mode=0o700, exist_ok=True)
-        self._instance_id = secrets.token_hex(16)
-        self._runtime = Runtime.from_environment(
-            blocking_workers=1,
-            defaults={
-                "HOST_MAX_IN_FLIGHT": 8,
-                "HOST_MAX_CONNECTIONS": 8,
-                "CLIENT_MAX_CONNECTIONS": 4,
-                "CLIENT_MAX_REFERENCES": 1,
-                "MAX_REQUEST_BYTES": 220000,
-                "MAX_RESPONSE_BYTES": 65536,
-                "CALL_TIMEOUT_MS": 300000,
-                "SHUTDOWN_TIMEOUT_MS": 30000,
-            },
-            ceilings={
-                "HOST_MAX_IN_FLIGHT": 8,
-                "HOST_MAX_CONNECTIONS": 8,
-                "CLIENT_MAX_CONNECTIONS": 4,
-                "CLIENT_MAX_REFERENCES": 1,
-                "MAX_REQUEST_BYTES": 220000,
-                "MAX_RESPONSE_BYTES": 65536,
-            },
-        )
-        self._client = Client(
-            str(path),
-            runtime=self._runtime,
-            instance_id=self._instance_id,
-            limits=Limits(
-                connections=4, body_bytes=220_000, response_bytes=65_536, call_timeout=300, shutdown_timeout=30
-            ),
-        )
         self._state = "loading"
         self._error = None
         self._started_monotonic = time.monotonic()
         self._cuda_devices = await _cuda_device_count()
         environment = os.environ.copy()
-        environment.update({"STT_" + key.upper(): str(value) for key, value in self.settings.model_dump().items()})
         environment.update(
             {
                 "VLLM_LOGGING_LEVEL": self.settings.vllm_log_level.upper(),
@@ -296,7 +269,7 @@ class VllmEngine:
         try:
             _enable_child_subreaper()
             self._process = await asyncio.create_subprocess_exec(
-                *build_engine_command(self.settings, self._instance_id),
+                *build_engine_command(self.settings),
                 env=environment,
                 start_new_session=True,
             )
@@ -308,44 +281,35 @@ class VllmEngine:
         except Exception as exc:
             self._state = "error"
             self._error = f"{type(exc).__name__}: {exc}"
-            self._client.close()
-            self._runtime.close()
-            self._client, self._runtime = None, None
             raise
         self._monitor_task = asyncio.create_task(self._monitor(), name="vllm-readiness")
 
     async def _monitor(self) -> None:
         deadline = time.monotonic() + self.settings.startup_timeout_seconds
-        assert self._client is not None and self._runtime is not None
-        while True:
-            process = self._process
-            if process is None:
-                return
-            if process.returncode is not None:
-                self._state = "error"
-                self._error = f"model worker exited with code {process.returncode}"
-                return
-            try:
-                response = await asyncio.wrap_future(
-                    self._runtime.submit(self._client.call_async("/v1/status", method="GET", timeout=3))
-                )
-                status = json.loads(response.body)
-                if status["state"] == "error":
-                    self._state, self._error = "error", status["error"]
+        async with httpx.AsyncClient(timeout=3) as client:
+            while True:
+                process = self._process
+                if process is None:
                     return
-                if status["state"] == "ready":
-                    self._state = "ready"
-                    self._loaded_at = time.time()
-                    if self._started_monotonic is not None:
-                        self._load_seconds = round(time.monotonic() - self._started_monotonic, 3)
-                    break
-            except (Fault, TransportError):
-                pass
-            if time.monotonic() >= deadline:
-                self._state = "error"
-                self._error = "model startup timed out"
-                return
-            await asyncio.sleep(2)
+                if process.returncode is not None:
+                    self._state = "error"
+                    self._error = f"vLLM exited with code {process.returncode}"
+                    return
+                try:
+                    response = await client.get(f"{self.settings.internal_http_url}/")
+                    if response.status_code == 200:
+                        self._state = "ready"
+                        self._loaded_at = time.time()
+                        if self._started_monotonic is not None:
+                            self._load_seconds = round(time.monotonic() - self._started_monotonic, 3)
+                        break
+                except httpx.HTTPError:
+                    pass
+                if time.monotonic() >= deadline:
+                    self._state = "error"
+                    self._error = f"{self.settings.engine_variant} model startup timed out"
+                    return
+                await asyncio.sleep(2)
         process = self._process
         if process is not None:
             return_code = await process.wait()
@@ -364,17 +328,12 @@ class VllmEngine:
         process_group_id = self._process_group_id
         self._process = None
         self._process_group_id = None
+        if process is None and process_group_id is None:
+            return
         if process_group_id is not None:
             await _terminate_process_group(process, process_group_id)
         elif process is not None:
             await _terminate_process(process)
-        if self._client is not None:
-            await asyncio.wrap_future(self._runtime.submit(self._client.close_async()))
-            self._client = None
-        if self._runtime is not None:
-            self._runtime.close()
-            self._runtime = None
-        self._state = "idle"
 
     async def reconfigure(self, settings: Settings) -> None:
         await self.close()
@@ -407,8 +366,7 @@ class VllmEngine:
     async def open_session(self) -> RealtimeSession:
         if self._state != "ready":
             raise EngineNotReady(self._error or f"model is {self._state}")
-        assert self._client is not None
-        return await QwenSdkRealtimeSession.open(self.settings, self._client)
+        return await QwenSdkRealtimeSession.open(self.settings)
 
     async def transcribe_file(
         self,
@@ -417,14 +375,7 @@ class VllmEngine:
         language: str | None,
         prompt: str | None,
     ) -> Transcript:
-        assert self._runtime is not None
-        pcm = await asyncio.wrap_future(
-            self._runtime.submit(
-                self._runtime.blocking(
-                    self, _decode_audio_pcm16, path, self.settings.model_session_max_seconds * 32_000
-                )
-            )
-        )
+        pcm = await asyncio.to_thread(_decode_audio_pcm16, path)
         started = time.perf_counter()
         session = await self.open_session()
         try:
@@ -629,7 +580,7 @@ async def _wait_for_process_group_until(process_group_id: int, deadline: float) 
         await asyncio.sleep(0.1)
 
 
-def _decode_audio_pcm16(path: str, max_bytes: int = 9_600_000) -> bytes:
+def _decode_audio_pcm16(path: str) -> bytes:
     import av
 
     output = bytearray()
@@ -640,15 +591,9 @@ def _decode_audio_pcm16(path: str, max_bytes: int = 9_600_000) -> bytes:
         resampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
         for frame in container.decode(stream):
             for resampled in resampler.resample(frame):
-                payload = resampled.to_ndarray().astype("<i2", copy=False).tobytes()
-                if len(output) + len(payload) > max_bytes:
-                    raise ValueError("decoded audio exceeds model utterance duration limit")
-                output.extend(payload)
+                output.extend(resampled.to_ndarray().astype("<i2", copy=False).tobytes())
         for resampled in resampler.resample(None):
-            payload = resampled.to_ndarray().astype("<i2", copy=False).tobytes()
-            if len(output) + len(payload) > max_bytes:
-                raise ValueError("decoded audio exceeds model utterance duration limit")
-            output.extend(payload)
+            output.extend(resampled.to_ndarray().astype("<i2", copy=False).tobytes())
     if not output:
         raise ValueError("uploaded audio has no decodable samples")
     return bytes(output)

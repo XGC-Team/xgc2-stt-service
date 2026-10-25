@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import queue
 import sys
 import threading
 from collections.abc import Callable
@@ -11,7 +13,6 @@ import gi
 from Xlib import XK, X, display, error
 
 from .desktop_audio import AudioCapture
-from .desktop_stream import DesktopStreams, StreamingWorker
 from .desktop_support import (
     CLIENT_BINARY,
     DesktopIpcListener,
@@ -25,12 +26,16 @@ from .desktop_support import (
     save_desktop_settings,
     set_autostart,
     should_auto_enter,
+    streaming_headers,
     streaming_url,
 )
 
 gi.require_version("Gdk", "3.0")
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gdk, Gio, GLib, Gtk
+
+_COMMIT = object()
+_CANCEL = object()
 
 
 def _load_appindicator() -> Any:
@@ -234,6 +239,105 @@ def create_hotkey_listener(specification: str, callback: Any) -> ExclusiveX11Hot
             "Wayland 下全局抓键不可用。请使用状态栏菜单，或把系统快捷键绑定到 xgc2-stt-client --toggle-capture。"
         )
     return ExclusiveX11HotKey(specification, callback)
+
+
+class StreamingWorker:
+    def __init__(
+        self,
+        settings: DesktopSettings,
+        *,
+        on_connected: Callable[[], None],
+        on_hypothesis: Callable[[str, str, str], None],
+        on_state: Callable[[str], None],
+        on_segment: Callable[[str], None],
+        on_failed: Callable[[str], None],
+        on_completed: Callable[[], None],
+    ):
+        self.settings = settings
+        self.on_connected = on_connected
+        self.on_hypothesis = on_hypothesis
+        self.on_state = on_state
+        self.on_segment = on_segment
+        self.on_failed = on_failed
+        self.on_completed = on_completed
+        self._outgoing: queue.Queue[Any] = queue.Queue()
+        self._thread = threading.Thread(target=self._run, name="xgc2-stt-stream", daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def feed(self, pcm: bytes) -> None:
+        if pcm:
+            self._outgoing.put(pcm)
+
+    def commit(self) -> None:
+        self._outgoing.put(_COMMIT)
+
+    def cancel(self) -> None:
+        self._outgoing.put(_CANCEL)
+
+    def _run(self) -> None:
+        from websocket import ABNF, WebSocketTimeoutException, create_connection
+
+        final_received = False
+        socket = None
+        try:
+            headers = [f"{key}: {value}" for key, value in streaming_headers(self.settings).items()]
+            connect_options = {"timeout": 10}
+            if headers:
+                connect_options["header"] = headers
+            socket = create_connection(streaming_url(self.settings), **connect_options)
+            socket.settimeout(15)
+            first = json.loads(socket.recv())
+            if first.get("type") != "session.started":
+                raise RuntimeError(first.get("message") or "服务未创建识别会话")
+            _ui(self.on_connected)
+            socket.settimeout(0.01)
+            while True:
+                try:
+                    outgoing = self._outgoing.get(timeout=0.01)
+                except queue.Empty:
+                    outgoing = None
+                if outgoing is _CANCEL:
+                    socket.send(json.dumps({"type": "close"}))
+                    return
+                if outgoing is _COMMIT:
+                    socket.send(json.dumps({"type": "commit"}))
+                    _ui(self.on_state, "收尾")
+                elif isinstance(outgoing, bytes):
+                    socket.send(outgoing, opcode=ABNF.OPCODE_BINARY)
+                try:
+                    raw = socket.recv()
+                except (WebSocketTimeoutException, TimeoutError):
+                    continue
+                event = json.loads(raw)
+                event_type = event.get("type")
+                if event_type == "transcript.partial":
+                    text = str(event.get("text") or "")
+                    stable = str(event.get("stable_text") or "")
+                    unstable = str(event.get("unstable_text") or "")
+                    if not stable and not unstable:
+                        unstable = text
+                    _ui(self.on_hypothesis, text, stable, unstable)
+                elif event_type == "transcript.final":
+                    final_text = str(event.get("text") or "")
+                    if final_text:
+                        _ui(self.on_hypothesis, final_text, final_text, "")
+                    _ui(self.on_segment, str(event.get("reason") or "commit"))
+                    if event.get("session_complete", True):
+                        final_received = True
+                        return
+                    _ui(self.on_state, "录音中")
+                elif event_type == "error":
+                    raise RuntimeError(str(event.get("message") or event.get("code") or "识别失败"))
+        except Exception as exc:
+            _ui(self.on_failed, str(exc))
+        finally:
+            if socket is not None:
+                with suppress(Exception):
+                    socket.close()
+            if final_received:
+                _ui(self.on_completed)
 
 
 class FocusTracker:
@@ -551,11 +655,6 @@ class ClientController:
         self._shutting_down = False
         self._ipc = DesktopIpcListener(lambda command: _ui(self._handle_ipc, command))
         self._ipc.start()
-        try:
-            self._streams = DesktopStreams()
-        except BaseException:
-            self._ipc.stop()
-            raise
         self._start_hotkey()
 
         AppIndicator3 = _load_appindicator()
@@ -661,29 +760,25 @@ class ClientController:
         self.overlay.show_bottom_center()
         worker = StreamingWorker(
             self.settings,
-            owner=self._streams,
-            dispatch=_ui,
-            on_connected=lambda: self._start_audio(worker),
+            on_connected=self._start_audio,
             on_hypothesis=self._inject_hypothesis,
-            on_state=self._stream_state,
+            on_state=lambda state: self.overlay.set_state(state, "#d7ae66"),
             on_segment=self._commit_segment,
             on_failed=self._stream_failed,
             on_completed=self._stream_completed,
         )
         self.worker = worker
-        try:
-            worker.start()
-        except Exception as exc:
-            self._stream_failed(str(exc))
+        worker.start()
 
-    def _start_audio(self, worker: StreamingWorker) -> None:
-        if self._shutting_down or self.worker is not worker or self.state != "connecting":
+    def _start_audio(self) -> None:
+        if self.worker is None:
             return
         try:
-            self.capture = AudioCapture(self.worker.feed, self.worker.fail)
+            self.capture = AudioCapture(self.worker.feed, lambda message: _ui(self._stream_failed, message))
             self.capture.start()
         except Exception as exc:
-            self.worker.fail(str(exc))
+            self.worker.cancel()
+            self._stream_failed(str(exc))
             return
         self.state = "recording"
         self._sync_tray()
@@ -700,15 +795,6 @@ class ClientController:
             self.worker.commit()
         else:
             self._finish_session()
-
-    def _stream_state(self, state: str) -> None:
-        if state != "录音中":
-            if self.capture is not None:
-                self.capture.stop()
-                self.capture = None
-            self.state = "finalizing"
-            self._sync_tray()
-        self.overlay.set_state(state, "#d7ae66")
 
     def _inject_hypothesis(self, text: str, stable: str, unstable: str) -> None:
         self.overlay.set_preview(stable, unstable, text)
@@ -815,11 +901,6 @@ class ClientController:
             self.capture.stop()
         if self.worker is not None:
             self.worker.cancel()
-        try:
-            self._streams.close()
-        except Exception:
-            self._shutting_down = False
-            raise
         if self.hotkeys is not None:
             with suppress(Exception):
                 self.hotkeys.stop()

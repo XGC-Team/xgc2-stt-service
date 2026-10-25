@@ -303,8 +303,7 @@ export default function App() {
     localStorage.setItem('xgc2-stt.outputScript', next.outputScript)
     localStorage.setItem('xgc2-stt.trimLeadingSilence', String(next.trimLeadingSilence))
     try {
-      const updatedRuntime = draftRuntime && runtimeSettings
-        ? await updateRuntimeSettings(draftRuntime, runtimeSettings.revision) : runtimeSettings
+      const updatedRuntime = draftRuntime ? await updateRuntimeSettings(draftRuntime) : runtimeSettings
       if (updatedRuntime) {
         setRuntimeSettings(updatedRuntime)
         setDraftRuntime(updatedRuntime.values)
